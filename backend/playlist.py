@@ -1,58 +1,21 @@
-import os
-import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
 from typing import Dict, List, Tuple
 
 import cityhash
-from arango import ArangoClient
 from spotify_scraper import SpotifyClient
 
 from artist_enrichment import enrich_artist, enrich_song
+from config import settings
+from db.client import ensure_collection, get_db
+from graph import schema
+from utils import normalization
 
-
-DB_NAME = "spotify"
-DB_PASSWORD = "test"
-PLAYLIST_NAME_FALLBACK = "playlist"
-GRAPH_NAME_PREFIX = "spotify_kg"
-GRAPH_JOBS_COLLECTION = "graph_jobs"
-PLAYLIST_URL = "https://open.spotify.com/playlist/37i9dQZEVXbNG2KDcFcKOF"
-ENRICH_MAX_WORKERS = int(os.getenv("ENRICH_MAX_WORKERS", "6"))
+logger = logging.getLogger(__name__)
 
 # Optional manual overrides for artist name normalization.
 # Keys should be normalized (lowercase, trimmed); values are canonical names.
 ARTIST_ALIAS_OVERRIDES: Dict[str, str] = {}
-
-# Node collections (snake_case)
-ARTISTS_COLLECTION = "artists"
-SONGS_COLLECTION = "songs"
-ALBUMS_COLLECTION = "albums"
-LABELS_COLLECTION = "record_labels"
-PLAYLISTS_COLLECTION = "playlists"
-GENRES_COLLECTION = "genres"
-LOCATIONS_COLLECTION = "locations"
-SONGWRITERS_COLLECTION = "songwriters"
-PRODUCERS_COLLECTION = "producers"
-MOODS_COLLECTION = "moods"
-INSTRUMENTS_COLLECTION = "instruments"
-LANGUAGES_COLLECTION = "languages"
-CONTRIBUTORS_COLLECTION = "contributors"
-
-# Edge collections (snake_case)
-ARTISTS_SONGS = "artists_songs"
-ARTISTS_ALBUMS = "artists_albums"
-SONGS_ALBUMS = "songs_albums"
-ALBUMS_LABELS = "albums_record_labels"
-ARTISTS_GENRES = "artists_genres"
-ARTISTS_LOCATIONS = "artists_locations"
-ARTISTS_LABELS = "artists_record_labels"
-ARTISTS_ACTS = "artists_associated_acts"
-SONGS_WRITERS = "songs_songwriters"
-SONGS_PRODUCERS = "songs_producers"
-SONGS_FEATURES = "songs_features"
-SONGS_MOODS = "songs_moods"
-SONGS_INSTRUMENTS = "songs_instruments"
-SONGS_LANGUAGES = "songs_languages"
-SONGS_CONTRIBUTORS = "songs_contributors"
 
 
 def _farmhash_key(prefix: str, raw: str) -> str:
@@ -60,100 +23,19 @@ def _farmhash_key(prefix: str, raw: str) -> str:
     return str(cityhash.CityHash64(seed))
 
 
-def _normalize_name(value: str) -> str:
-    return " ".join((value or "").strip().split()).lower()
-
-
-def _strip_feat(value: str) -> str:
-    return re.split(r"\s+(feat\.?|featuring|ft\.?)\s+", value, maxsplit=1, flags=re.IGNORECASE)[0]
-
-
-def _artist_variants(value: str) -> set[str]:
-    base = _normalize_name(value)
-    if not base:
-        return set()
-    variants = {base}
-    stripped_feat = _normalize_name(_strip_feat(base))
-    if stripped_feat:
-        variants.add(stripped_feat)
-    no_punct = _normalize_name(re.sub(r"[^\w\s]", "", base))
-    if no_punct:
-        variants.add(no_punct)
-    no_the = _normalize_name(re.sub(r"^the\s+", "", base))
-    if no_the:
-        variants.add(no_the)
-    if "&" in base:
-        variants.add(_normalize_name(base.replace("&", "and")))
-    if " and " in base:
-        variants.add(_normalize_name(base.replace(" and ", " & ")))
-    return variants
-
-
-def _split_artist_names(value: str) -> List[str]:
-    if not value:
-        return []
-    parts = [part.strip() for part in value.split(",")]
-    return [part for part in parts if part]
-
-
 def _resolve_playlist_artist(name: str, lookup: Dict[str, str]) -> str | None:
-    for variant in _artist_variants(name):
+    for variant in normalization.artist_variants(name):
         match = lookup.get(variant)
         if match:
             return match
     return None
 
 
-def _collection_prefix(graph_id: str) -> str:
-    return f"g_{graph_id}"
-
-
-def _graph_name(graph_id: str) -> str:
-    return f"{GRAPH_NAME_PREFIX}_{_collection_prefix(graph_id)}"
-
-
-def _collection_map(graph_id: str) -> Dict[str, Dict[str, str]]:
-    prefix = _collection_prefix(graph_id)
-    nodes = {
-        "artists": f"{prefix}_{ARTISTS_COLLECTION}",
-        "songs": f"{prefix}_{SONGS_COLLECTION}",
-        "albums": f"{prefix}_{ALBUMS_COLLECTION}",
-        "record_labels": f"{prefix}_{LABELS_COLLECTION}",
-        "playlists": f"{prefix}_{PLAYLISTS_COLLECTION}",
-        "genres": f"{prefix}_{GENRES_COLLECTION}",
-        "locations": f"{prefix}_{LOCATIONS_COLLECTION}",
-        "songwriters": f"{prefix}_{SONGWRITERS_COLLECTION}",
-        "producers": f"{prefix}_{PRODUCERS_COLLECTION}",
-        "moods": f"{prefix}_{MOODS_COLLECTION}",
-        "instruments": f"{prefix}_{INSTRUMENTS_COLLECTION}",
-        "languages": f"{prefix}_{LANGUAGES_COLLECTION}",
-        "contributors": f"{prefix}_{CONTRIBUTORS_COLLECTION}",
-    }
-    edges = {
-        "artists_songs": f"{prefix}_{ARTISTS_SONGS}",
-        "artists_albums": f"{prefix}_{ARTISTS_ALBUMS}",
-        "songs_albums": f"{prefix}_{SONGS_ALBUMS}",
-        "albums_record_labels": f"{prefix}_{ALBUMS_LABELS}",
-        "artists_genres": f"{prefix}_{ARTISTS_GENRES}",
-        "artists_locations": f"{prefix}_{ARTISTS_LOCATIONS}",
-        "artists_record_labels": f"{prefix}_{ARTISTS_LABELS}",
-        "artists_associated_acts": f"{prefix}_{ARTISTS_ACTS}",
-        "songs_songwriters": f"{prefix}_{SONGS_WRITERS}",
-        "songs_producers": f"{prefix}_{SONGS_PRODUCERS}",
-        "songs_features": f"{prefix}_{SONGS_FEATURES}",
-        "songs_moods": f"{prefix}_{SONGS_MOODS}",
-        "songs_instruments": f"{prefix}_{SONGS_INSTRUMENTS}",
-        "songs_languages": f"{prefix}_{SONGS_LANGUAGES}",
-        "songs_contributors": f"{prefix}_{SONGS_CONTRIBUTORS}",
-    }
-    return {"nodes": nodes, "edges": edges}
-
-
 def _load_playlist(playlist_url: str) -> Tuple[str, List[Dict]]:
     client = SpotifyClient()
     try:
         playlist = client.get_playlist_info(playlist_url)
-        playlist_name = playlist.get("name") or PLAYLIST_NAME_FALLBACK
+        playlist_name = playlist.get("name") or settings.PLAYLIST_NAME_FALLBACK
         tracks_container = playlist.get("tracks", {})
         if isinstance(tracks_container, dict):
             tracks = tracks_container.get("items", [])
@@ -162,11 +44,6 @@ def _load_playlist(playlist_url: str) -> Tuple[str, List[Dict]]:
         return playlist_name, tracks
     finally:
         client.close()
-
-
-def _ensure_collection(db, name: str, edge: bool = False) -> None:
-    if not db.has_collection(name):
-        db.create_collection(name, edge=edge)
 
 
 def _truncate_collection(db, name: str) -> None:
@@ -287,9 +164,9 @@ def build_and_upload_graph(
     graph_id: str,
     reset: bool = True,
 ) -> Tuple[int, int, Dict[str, Dict[str, str]]]:
-    db = ArangoClient().db(DB_NAME, password=DB_PASSWORD)
-    graph_name = _graph_name(graph_id)
-    collection_map = _collection_map(graph_id)
+    db = get_db()
+    graph_name = schema.graph_name(graph_id)
+    collection_map = schema.collection_map(graph_id)
     nodes_map = collection_map["nodes"]
     edges_map = collection_map["edges"]
     node_collections = list(nodes_map.values())
@@ -299,9 +176,9 @@ def build_and_upload_graph(
         _reset_graph(db, graph_name, node_collections, edge_collections)
 
     for collection in node_collections:
-        _ensure_collection(db, collection)
+        ensure_collection(db, collection)
     for collection in edge_collections:
-        _ensure_collection(db, collection, edge=True)
+        ensure_collection(db, collection, edge=True)
     _ensure_graph(db, graph_name, nodes_map, edges_map)
 
     playlist_name, tracks = _load_playlist(playlist_url)
@@ -315,13 +192,13 @@ def build_and_upload_graph(
             artist_name = artist.get("name", "")
             if not artist_name:
                 continue
-            for split_name in _split_artist_names(artist_name):
-                for variant in _artist_variants(split_name):
+            for split_name in normalization.split_artist_names(artist_name):
+                for variant in normalization.artist_variants(split_name):
                     if variant and variant not in playlist_artist_lookup:
                         playlist_artist_lookup[variant] = split_name
 
     for alias, canonical in ARTIST_ALIAS_OVERRIDES.items():
-        normalized_alias = _normalize_name(alias)
+        normalized_alias = normalization.normalize_name_lower(alias)
         if normalized_alias:
             playlist_artist_lookup[normalized_alias] = canonical
 
@@ -394,7 +271,7 @@ def build_and_upload_graph(
             artist_name = artist.get("name", "")
             if not artist_name:
                 continue
-            for split_name in _split_artist_names(artist_name):
+            for split_name in normalization.split_artist_names(artist_name):
                 artist_key = _farmhash_key("artist", split_name)
                 artist_id = upsert_node(nodes_map["artists"], artist_key, {"name": split_name})
                 add_edge(edges_map["artists_songs"], artist_id, song_id, "performed")
@@ -422,18 +299,18 @@ def enrich_graph(
     playlist_url: str,
     graph_id: str,
 ) -> Tuple[int, int, Dict[str, Dict[str, str]]]:
-    db = ArangoClient().db(DB_NAME, password=DB_PASSWORD)
-    graph_name = _graph_name(graph_id)
-    collection_map = _collection_map(graph_id)
+    db = get_db()
+    graph_name = schema.graph_name(graph_id)
+    collection_map = schema.collection_map(graph_id)
     nodes_map = collection_map["nodes"]
     edges_map = collection_map["edges"]
     node_collections = list(nodes_map.values())
     edge_collections = list(edges_map.values())
 
     for collection in node_collections:
-        _ensure_collection(db, collection)
+        ensure_collection(db, collection)
     for collection in edge_collections:
-        _ensure_collection(db, collection, edge=True)
+        ensure_collection(db, collection, edge=True)
     _ensure_graph(db, graph_name, nodes_map, edges_map)
 
     playlist_name, tracks = _load_playlist(playlist_url)
@@ -447,8 +324,8 @@ def enrich_graph(
             artist_name = artist.get("name", "")
             if not artist_name:
                 continue
-            for split_name in _split_artist_names(artist_name):
-                normalized = _normalize_name(split_name)
+                for split_name in normalization.split_artist_names(artist_name):
+                    normalized = normalization.normalize_name_lower(split_name)
                 if normalized and normalized not in playlist_artist_lookup:
                     playlist_artist_lookup[normalized] = split_name
 
@@ -537,6 +414,7 @@ def enrich_graph(
         try:
             return enrich_artist(artist_name)
         except Exception:
+            logger.warning("Artist enrichment failed", extra={"artist": artist_name})
             return {
                 "genres": [],
                 "labels": [],
@@ -552,6 +430,10 @@ def enrich_graph(
         try:
             return enrich_song(track_name, primary_artist)
         except Exception:
+            logger.warning(
+                "Song enrichment failed",
+                extra={"track": track_name, "artist": primary_artist},
+            )
             return {
                 "writers": [],
                 "producers": [],
@@ -574,7 +456,7 @@ def enrich_graph(
             }
 
     if unique_artists or unique_song_keys:
-        max_workers = max(1, ENRICH_MAX_WORKERS)
+        max_workers = max(1, settings.ENRICH_MAX_WORKERS)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             artist_futures = {
                 executor.submit(_safe_enrich_artist, name): name for name in unique_artists
@@ -813,5 +695,5 @@ def enrich_graph(
 
 
 if __name__ == "__main__":
-    nodes, edges, _ = build_and_upload_graph(PLAYLIST_URL, "default")
+    nodes, edges, _ = build_and_upload_graph(settings.PLAYLIST_URL, "default")
     print(f"Uploaded {nodes} nodes and {edges} edges to ArangoDB.")
