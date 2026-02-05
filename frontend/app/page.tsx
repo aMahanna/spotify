@@ -38,6 +38,7 @@ export default function Home() {
     { graph_id: string; playlist_url: string; playlist_name?: string }[]
   >([])
   const [selectedGraphId, setSelectedGraphId] = useState<string | null>(null)
+  const [selectedGraphLabel, setSelectedGraphLabel] = useState<string | null>(null)
   const [graphRefreshToken, setGraphRefreshToken] = useState<number>(0)
 
   const graphId = searchParams.get("graph_id")
@@ -149,6 +150,22 @@ export default function Home() {
         const data = await response.json()
         const playlists = Array.isArray(data?.playlists) ? data.playlists : []
         setAvailablePlaylists(playlists)
+        if (effectiveGraphId) {
+          const match = playlists.find((item: { graph_id: string; playlist_name?: string; playlist_url?: string }) => (
+            item.graph_id === effectiveGraphId
+          ))
+          if (match) {
+            setSelectedGraphLabel(match.playlist_name || match.playlist_url || match.graph_id)
+          }
+        }
+        const hasActiveJob = jobStatus === "queued" || jobStatus === "running" || enrichStatus === "queued" || enrichStatus === "running"
+        const hasSelectedInList = effectiveGraphId
+          ? playlists.some((item: { graph_id: string }) => item.graph_id === effectiveGraphId)
+          : true
+        if (!hasActiveJob && effectiveGraphId && !hasSelectedInList) {
+          setSelectedGraphId(null)
+          router.replace("/")
+        }
       } catch {
         // Preserve existing list if refresh fails mid-job
       }
@@ -188,6 +205,12 @@ export default function Home() {
   const handleSelectChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const value = event.target.value
     setSelectedGraphId(value || null)
+    if (!value) {
+      setSelectedGraphLabel(null)
+    } else {
+      const match = availablePlaylists.find((item) => item.graph_id === value)
+      setSelectedGraphLabel(match?.playlist_name || match?.playlist_url || value)
+    }
     if (value) {
       router.replace(`/?graph_id=${value}`)
     } else {
@@ -279,9 +302,11 @@ export default function Home() {
             value={effectiveGraphId || ""}
             onChange={handleSelectChange}
           >
-            {effectiveGraphId && !sortedPlaylists.some((item) => item.graph_id === effectiveGraphId) && (
+            {effectiveGraphId &&
+              !sortedPlaylists.some((item) => item.graph_id === effectiveGraphId) &&
+              (isBuilding || isEnriching) && (
               <option value={effectiveGraphId}>
-                {effectiveGraphId}
+                {selectedGraphLabel || effectiveGraphId}
               </option>
             )}
             {sortedPlaylists.map((item) => (

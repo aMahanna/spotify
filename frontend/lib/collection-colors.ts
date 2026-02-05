@@ -12,7 +12,9 @@ export const NODE_COLLECTIONS: Record<string, CollectionInfo> = {
   record_labels: { label: "Record Labels", color: "#F39C12" },
   playlists: { label: "Playlists", color: "#E74C3C" },
   genres: { label: "Genres", color: "#2ECC71" },
-  locations: { label: "Locations", color: "#95A5A6" }
+  locations: { label: "Locations", color: "#95A5A6" },
+  instruments: { label: "Instruments", color: "#FF69B4" },
+  producers: { label: "Producers", color: "#F1C40F" }
 }
 
 export const EDGE_COLLECTIONS: Record<string, CollectionInfo> = {
