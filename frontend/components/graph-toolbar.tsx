@@ -16,7 +16,7 @@
 //
 "use client"
 
-import { Download, Maximize, Minimize, CuboidIcon, LayoutGrid, Database, Search as SearchIcon, Settings, Zap, HelpCircle } from "lucide-react"
+import { Download, Maximize, LayoutGrid, Database, Search as SearchIcon, Settings, Zap, HelpCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
@@ -38,9 +38,6 @@ import {
 
 interface GraphToolbarProps {
   // View controls
-  use3D: boolean
-  onToggle3D: () => void
-  isFullscreen: boolean
   onToggleFullscreen: () => void
   
   // Layout controls
@@ -73,9 +70,6 @@ interface GraphToolbarProps {
 }
 
 export function GraphToolbar({
-  use3D,
-  onToggle3D,
-  isFullscreen,
   onToggleFullscreen,
   layoutType,
   onLayoutChange,
@@ -105,76 +99,55 @@ export function GraphToolbar({
               <TooltipTrigger asChild>
                 <Button 
                   size="sm" 
-                  variant={use3D ? "default" : "outline"}
-                  onClick={onToggle3D}
-                  className={`${use3D ? 'bg-nvidia-green hover:bg-nvidia-green/90 text-white border-nvidia-green' : 'border-border hover:bg-muted/50 text-foreground'} px-3 py-2 gap-2`}
-                >
-                  <CuboidIcon className="h-4 w-4" />
-                  <span className="hidden sm:inline">{use3D ? '2D' : '3D'}</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                Switch to {use3D ? '2D' : '3D'} view
-              </TooltipContent>
-            </Tooltip>
-            
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button 
-                  size="sm" 
                   variant="outline" 
                   onClick={onToggleFullscreen}
                   className="px-3 py-2 gap-2"
                 >
-                  {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
-                  <span className="hidden sm:inline">{isFullscreen ? "Exit" : "Fullscreen"}</span>
+                  <Maximize className="h-4 w-4" />
+                  <span className="hidden sm:inline">Fullscreen</span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                {isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                Open 3D fullscreen
               </TooltipContent>
             </Tooltip>
           </div>
 
-          {use3D && (
-            <>
-              <Separator orientation="vertical" className="h-6 hidden md:block" />
+          <Separator orientation="vertical" className="h-6 hidden md:block" />
 
-              {/* Layout Controls Group */}
-              <div className="flex items-center gap-1">
-                <span className="text-xs font-medium text-muted-foreground mr-2 hidden lg:inline">Layout:</span>
-                <div className="flex items-center gap-1">
-                  {[
-                    { key: "force", label: "Force", icon: null },
-                    { key: "hierarchical", label: "Tree", icon: null },
-                    { key: "radial", label: "Radial", icon: null }
-                  ].map((layout) => (
-                    <Tooltip key={layout.key}>
-                      <TooltipTrigger asChild>
-                        <Button
-                          size="sm"
-                          variant={layoutType === layout.key ? "default" : "ghost"}
-                          className={`h-8 px-2 text-xs ${
-                            layoutType === layout.key 
-                              ? "bg-nvidia-green hover:bg-nvidia-green/90 text-white" 
-                              : "hover:bg-muted"
-                          }`}
-                          onClick={() => onLayoutChange(layout.key as "force" | "hierarchical" | "radial")}
-                        >
-                          {layout.label}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {layout.label} layout
-                      </TooltipContent>
-                    </Tooltip>
-                  ))}
-                </div>
-              </div>
+          {/* Layout Controls Group */}
+          <div className="flex items-center gap-1">
+            <span className="text-xs font-medium text-muted-foreground mr-2 hidden lg:inline">Layout:</span>
+            <div className="flex items-center gap-1">
+              {[
+                { key: "force", label: "Force", icon: null },
+                { key: "hierarchical", label: "Tree", icon: null },
+                { key: "radial", label: "Radial", icon: null }
+              ].map((layout) => (
+                <Tooltip key={layout.key}>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant={layoutType === layout.key ? "default" : "ghost"}
+                      className={`h-8 px-2 text-xs ${
+                        layoutType === layout.key 
+                          ? "bg-nvidia-green hover:bg-nvidia-green/90 text-white" 
+                          : "hover:bg-muted"
+                      }`}
+                      onClick={() => onLayoutChange(layout.key as "force" | "hierarchical" | "radial")}
+                    >
+                      {layout.label}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {layout.label} layout
+                  </TooltipContent>
+                </Tooltip>
+              ))}
+            </div>
+          </div>
 
-              <Separator orientation="vertical" className="h-6 hidden md:block" />
-            </>
-          )}
+          <Separator orientation="vertical" className="h-6 hidden md:block" />
 
           {/* Data Source Controls */}
           <div className="flex items-center gap-2">

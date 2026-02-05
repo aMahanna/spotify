@@ -99,6 +99,44 @@ export default function Graph3DPage() {
   
   const { toast } = useToast()
 
+  const normalizeGraphData = useCallback((data: any) => {
+    if (!data) return data
+    const nodes = Array.isArray(data.nodes)
+      ? data.nodes.map((node: any) => ({
+          ...node,
+          color: node.color || getNodeColor(node),
+        }))
+      : undefined
+
+    let links = Array.isArray(data.links) ? data.links : undefined
+    if (!links && Array.isArray(data.edges) && Array.isArray(data.nodes)) {
+      links = data.edges
+        .map((edge: any) => {
+          if (!edge?._from || !edge?._to || !edge?.label) return null
+          return {
+            id: edge._id,
+            source: edge._from,
+            target: edge._to,
+            name: edge.label,
+            color: getEdgeColor(edge),
+          }
+        })
+        .filter(Boolean)
+    }
+    if (links) {
+      links = links.map((link: any) => ({
+        ...link,
+        color: link.color || getEdgeColor(link),
+      }))
+    }
+
+    return {
+      ...data,
+      nodes,
+      links,
+    }
+  }, [])
+
   // Handle clustering performance updates
   const handleClusteringUpdate = useCallback((metrics: PerformanceMetrics) => {
     setPerformanceMetrics(metrics)
@@ -326,7 +364,7 @@ export default function Graph3DPage() {
             const fallbackResponse = await fetch('/api/graph-data');
             if (fallbackResponse.ok) {
               const fallbackData = await fallbackResponse.json();
-              setGraphData(fallbackData);
+              setGraphData(normalizeGraphData(fallbackData));
               setIsLoading(false);
               return;
             }
@@ -380,7 +418,7 @@ export default function Graph3DPage() {
             ...node,
             color: node.color || getNodeColor(node)
           }))
-          setGraphData({ nodes: nodesWithColors, edges: data.edges, links: data.links || [] });
+          setGraphData(normalizeGraphData({ nodes: nodesWithColors, edges: data.edges, links: data.links || [] }));
           setDebugInfo(`Using ${data.nodes.length} nodes and ${data.edges.length} edges from ${data.databaseType || 'graph database'}`);
           setIsLoading(false);
           return;
@@ -411,7 +449,7 @@ export default function Graph3DPage() {
         }
         
         console.log("Setting graph data in state...");
-        setGraphData(data)
+        setGraphData(normalizeGraphData(data))
         setIsLoading(false)
       } catch (err) {
         console.error('Failed to load graph data:', err)
@@ -508,6 +546,7 @@ export default function Graph3DPage() {
                 <Settings className="w-3 h-3" />
                 Clustering
               </button>
+              
             </div>
 
             {/* Debug Info */}

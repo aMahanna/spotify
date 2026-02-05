@@ -26,7 +26,6 @@ import { Slider } from "@/components/ui/slider"
 
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { FallbackGraph } from "@/components/fallback-graph"
 import { GraphVisualization } from "@/components/graph-visualization"
 import { GraphLegend } from "@/components/graph-legend"
 import { GraphToolbar } from "@/components/graph-toolbar"
@@ -66,13 +65,11 @@ type KnowledgeGraphViewerProps = {
 export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphViewerProps) {
   const { documents } = useDocuments()
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], edges: [] })
-  const [isFullscreen, setIsFullscreen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [highlightedNodes, setHighlightedNodes] = useState<string[]>([])
   const [layoutType, setLayoutType] = useState<"force" | "hierarchical" | "radial">("force")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [use3D, setUse3D] = useState(false)
   const [storedTriples, setStoredTriples] = useState<Triple[]>([])
   const [storedGraphDocuments, setStoredGraphDocuments] = useState<{
     nodes: NodeDocument[]
@@ -84,7 +81,6 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
   const [enrichStatus, setEnrichStatus] = useState<"idle" | "queued" | "running" | "ready" | "failed">("idle")
   const [enrichError, setEnrichError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
-  const graphContainerRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   const normalizeKey = (value: string) => {
@@ -135,31 +131,6 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
 
     return { nodes, edges }
   }, [graphData.nodes, graphData.edges])
-
-  // Monitor fullscreen state changes
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-    };
-  }, []);
-
-  // Trigger rerender when fullscreen changes to ensure graph updates properly
-  useEffect(() => {
-    // A small timeout to ensure the graph has time to adjust
-    if (isFullscreen) {
-      const timer = setTimeout(() => {
-        // Dispatch a resize event to make sure canvas and component sizes are updated
-        window.dispatchEvent(new Event('resize'));
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [isFullscreen]);
 
   // Fetch stored triples from ArangoDB
   useEffect(() => {
@@ -345,82 +316,30 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
     setHighlightedNodes(matches)
   }
 
-  const toggleFullscreen = () => {
-    if (!graphContainerRef.current) return;
-    
-    if (!document.fullscreenElement) {
-      // Enter fullscreen
-      graphContainerRef.current.requestFullscreen().catch(err => {
-        console.error(`Error attempting to enter fullscreen: ${err.message}`);
-      });
-    } else {
-      // Exit fullscreen
-      document.exitFullscreen().catch(err => {
-        console.error(`Error attempting to exit fullscreen: ${err.message}`);
-      });
+  const openFullscreen3D = () => {
+    const params = new URLSearchParams()
+    params.set("layout", layoutType)
+    if (highlightedNodes.length > 0) {
+      params.set("highlightedNodes", JSON.stringify(highlightedNodes))
     }
-    // No need to set state here as the fullscreenchange event will handle it
-  }
 
-  const toggleViewMode = () => {
-    if (!use3D) {
-      // Navigate to 3D view using stored triples from database
-      // This avoids large request headers by using the database instead of localStorage/URL
-      console.log('Switching to 3D view using stored triples from database');
-      
-      // Check if we have stored triples available
-      if (includeStoredTriples && storedTriples.length > 0) {
-        // Use stored triples from database - no need to pass data through browser
-        window.location.href = `/graph3d?source=stored&layout=${layoutType}`;
-      } else {
-        // Fallback: use current document triples, but try to store them in DB first
-        const currentTriples = getTriples();
-        
-        if (currentTriples.length > 0) {
-          // Try to store current triples in database first, then use stored source
-          fetch('/api/graph-db/triples', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              triples: currentTriples,
-              documentName: 'Current Graph View'
-            })
-          }).then(response => {
-            if (response.ok) {
-              console.log('Successfully stored current triples in database');
-              // Use stored triples source
-              window.location.href = `/graph3d?source=stored&layout=${layoutType}`;
-            } else {
-              console.warn('Failed to store triples in database, using fallback');
-              // Fallback to localStorage for small datasets only
-              if (currentTriples.length <= 100) {
-                const storageId = `graph_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-                try {
-                  localStorage.setItem(storageId, JSON.stringify(currentTriples));
-                  window.location.href = `/graph3d?source=local&storageId=${storageId}&layout=${layoutType}`;
-                } catch (storageError) {
-                  console.error("localStorage also failed:", storageError);
-                  window.location.href = `/graph3d?source=stored&layout=${layoutType}`;
-                }
-              } else {
-                // For large datasets, just use stored source (may be empty but won't cause header issues)
-                console.warn('Large dataset detected, using stored source to avoid header size limits');
-                window.location.href = `/graph3d?source=stored&layout=${layoutType}`;
-              }
-            }
-          }).catch(error => {
-            console.error('Error storing triples:', error);
-            // Fallback to stored source
-            window.location.href = `/graph3d?source=stored&layout=${layoutType}`;
-          });
-        } else {
-          // No triples available, use stored source
-          window.location.href = `/graph3d?source=stored&layout=${layoutType}`;
-        }
-      }
-    } else {
-      // Toggle back to 2D
-      setUse3D(false);
+    if (graphId) {
+      params.set("id", graphId)
+      window.location.href = `/graph3d?${params.toString()}`
+      return
+    }
+
+    const graphPayload = { nodes: graphDocuments.nodes, edges: graphDocuments.edges }
+    const storageId = `graph_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`
+    try {
+      localStorage.setItem(storageId, JSON.stringify(graphPayload))
+      params.set("storageId", storageId)
+      window.location.href = `/graph3d?${params.toString()}`
+    } catch (storageError) {
+      console.error("localStorage failed:", storageError)
+      const currentTriples = getTriples()
+      params.set("triples", JSON.stringify(currentTriples))
+      window.location.href = `/graph3d?${params.toString()}`
     }
   }
 
@@ -500,13 +419,8 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
   useKeyboardShortcuts([
     {
       key: 'f',
-      callback: toggleFullscreen,
-      description: 'Toggle fullscreen'
-    },
-    {
-      key: '3',
-      callback: toggleViewMode,
-      description: 'Toggle 3D view'
+      callback: openFullscreen3D,
+      description: 'Open 3D fullscreen'
     },
     {
       key: 'k',
@@ -530,16 +444,13 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
       callback: () => setLayoutType('radial'),
       description: 'Radial layout'
     }
-  ], !isFullscreen) // Disable shortcuts in fullscreen to avoid conflicts
+  ]) 
 
   return (
     <div className="space-y-4">
       {/* New Organized Toolbar */}
       <GraphToolbar
-        use3D={use3D}
-        onToggle3D={toggleViewMode}
-        isFullscreen={isFullscreen}
-        onToggleFullscreen={toggleFullscreen}
+        onToggleFullscreen={openFullscreen3D}
         layoutType={layoutType}
         onLayoutChange={setLayoutType}
         includeStoredTriples={includeStoredTriples}
@@ -564,9 +475,8 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
       <div className="space-y-6">
           
           <div 
-            ref={graphContainerRef}
-            className={`overflow-hidden border border-border rounded-lg transition-all ${isFullscreen ? 'fixed inset-0 z-50 bg-background' : 'relative'}`}
-            style={{ height: isFullscreen ? '100vh' : '500px' }}
+            className="overflow-hidden border border-border rounded-lg transition-all relative"
+            style={{ height: '500px' }}
           >
             {loading ? (
               <div className="absolute inset-0 flex items-center justify-center">
@@ -583,20 +493,12 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
                   <p className="text-sm text-muted-foreground">Process documents to generate a knowledge graph</p>
                 </div>
               </div>
-            ) : use3D ? (
+            ) : (
               <GraphVisualization 
                 nodes={graphDocuments.nodes}
                 edges={graphDocuments.edges}
-                fullscreen={isFullscreen}
                 highlightedNodes={highlightedNodes}
                 layoutType={layoutType}
-                initialMode='3d'
-              />
-            ) : (
-              <FallbackGraph 
-                nodes={graphDocuments.nodes} 
-                edges={graphDocuments.edges}
-                fullscreen={isFullscreen}
               />
             )}
             {!loading && (

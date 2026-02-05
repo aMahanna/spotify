@@ -994,7 +994,7 @@ export function ForceGraphWrapper({
             .nodeRelSize(5)
             .nodeResolution(32) // Higher resolution for smoother nodes
             .nodeOpacity(0.8)
-            .linkOpacity(0.2)
+            .linkOpacity(0.08)
             .linkWidth(2)
             .showNavInfo(false)
             .onBackgroundClick(() => {
@@ -1334,7 +1334,7 @@ export function ForceGraphWrapper({
         const coloredNode = coloredNodes.find((n: any) => getNodeId(n) === getNodeId(node));
         return coloredNode?.color || node.color || getNodeColor(node);
       });
-      graphRef.current.linkColor((link: any) => link.color || '#ffffff80');
+      graphRef.current.linkColor((link: any) => link.color || '#ffffff40');
       graphRef.current.linkWidth(() => 2);
       graphRef.current.refresh();
     }
@@ -1472,7 +1472,7 @@ export function ForceGraphWrapper({
           });
         }
         
-        graphRef.current.linkColor((link: any) => link.color || '#ffffff80'); // Reset link colors too
+        graphRef.current.linkColor((link: any) => link.color || '#ffffff40'); // Reset link colors too
         graphRef.current.linkWidth(() => 2); // Reset to default width
         graphRef.current.refresh();
       }
@@ -1852,7 +1852,7 @@ export function ForceGraphWrapper({
         graph.graphData(data);
         graph
           .nodeColor((node: any) => node.color || getNodeColor(node))
-          .linkColor((link: any) => link.color || '#ffffff80');
+          .linkColor((link: any) => link.color || '#ffffff40');
         setTimeout(() => {
           graph.zoomToFit(400, 50);
         }, 500);
@@ -1871,7 +1871,7 @@ export function ForceGraphWrapper({
         graph.graphData(data);
         graph
           .nodeColor((node: any) => node.color || getNodeColor(node))
-          .linkColor((link: any) => link.color || '#ffffff80');
+          .linkColor((link: any) => link.color || '#ffffff40');
         
         setTimeout(() => {
           graph.zoomToFit(400, 70);
@@ -2199,7 +2199,7 @@ export function ForceGraphWrapper({
               return '#bd93f9'; // Purple for connected links
             }
           }
-          return link.color || '#ffffff80'; // Default semi-transparent white
+          return link.color || '#ffffff40'; // Default semi-transparent white
         })
         .linkWidth((link: any) => {
           // Make selected links thicker
@@ -2341,7 +2341,7 @@ export function ForceGraphWrapper({
 
     graphRef.current
       .linkWidth((link: any) => (isSelectedLink(link) ? 4 : 2))
-      .linkColor((link: any) => (isSelectedLink(link) ? '#00e5ff' : (link.color || '#ffffff80')))
+      .linkColor((link: any) => (isSelectedLink(link) ? '#00e5ff' : (link.color || '#ffffff40')))
       .nodeColor((node: any) => {
         const nodeId = getNodeId(node);
         if (nodeId === selectedLink.sourceId || nodeId === selectedLink.targetId) {
@@ -2473,11 +2473,6 @@ export function ForceGraphWrapper({
         // Reset to original colors
         graphRef.current.nodeColor((node: any) => node.color || '#4CAF50');
         graphRef.current.refresh();
-        
-        showNotification(
-          "Cluster colors disabled - using original node colors",
-          "info"
-        );
       }
     }
   }, [enableClusterColors, graphData, isClusteringEnabled, clusteringMethod, semanticAlgorithm])
@@ -2780,7 +2775,7 @@ export function ForceGraphWrapper({
                 }
               });
             }
-            graphRef.current.linkColor((link: any) => link.color || '#ffffff80');
+            graphRef.current.linkColor((link: any) => link.color || '#ffffff40');
             graphRef.current.linkWidth(() => 1);
             graphRef.current.refresh();
           }

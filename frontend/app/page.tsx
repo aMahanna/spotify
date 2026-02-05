@@ -18,7 +18,7 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
-import { Network, CuboidIcon, Loader2 } from "lucide-react"
+import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { VisualizeTab } from "@/components/tabs/VisualizeTab"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -150,7 +150,7 @@ export default function Home() {
         const playlists = Array.isArray(data?.playlists) ? data.playlists : []
         setAvailablePlaylists(playlists)
       } catch {
-        setAvailablePlaylists([])
+        // Preserve existing list if refresh fails mid-job
       }
     }
     loadPlaylists()
@@ -229,20 +229,6 @@ export default function Home() {
               Visualization, clustering, and navigation powered by the backend graph.
             </p>
           </div>
-          <div className="flex flex-wrap gap-3">
-            <Button asChild variant="outline">
-              <Link href="/graph" className="inline-flex items-center gap-2">
-                <Network className="h-4 w-4" />
-                2D Graph
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link href="/graph3d?source=stored" className="inline-flex items-center gap-2">
-                <CuboidIcon className="h-4 w-4" />
-                3D + Clustering
-              </Link>
-            </Button>
-          </div>
         </div>
 
         <div className="rounded-lg border border-border bg-card p-4">
@@ -293,6 +279,11 @@ export default function Home() {
             value={effectiveGraphId || ""}
             onChange={handleSelectChange}
           >
+            {effectiveGraphId && !sortedPlaylists.some((item) => item.graph_id === effectiveGraphId) && (
+              <option value={effectiveGraphId}>
+                {effectiveGraphId}
+              </option>
+            )}
             {sortedPlaylists.map((item) => (
               <option key={item.graph_id} value={item.graph_id}>
                 {item.playlist_name || item.playlist_url || item.graph_id}
