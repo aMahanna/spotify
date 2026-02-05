@@ -324,8 +324,8 @@ def enrich_graph(
             artist_name = artist.get("name", "")
             if not artist_name:
                 continue
-                for split_name in normalization.split_artist_names(artist_name):
-                    normalized = normalization.normalize_name_lower(split_name)
+            for split_name in normalization.split_artist_names(artist_name):
+                normalized = normalization.normalize_name_lower(split_name)
                 if normalized and normalized not in playlist_artist_lookup:
                     playlist_artist_lookup[normalized] = split_name
 
@@ -403,8 +403,10 @@ def enrich_graph(
         primary_artist = track_artists[0].get("name", "") if track_artists else ""
         for artist in track_artists:
             artist_name = artist.get("name", "")
-            if artist_name:
-                unique_artists.add(artist_name)
+            if not artist_name:
+                continue
+            for split_name in normalization.split_artist_names(artist_name):
+                unique_artists.add(split_name)
         if primary_artist:
             song_key = f"{track_name}|{primary_artist}"
             unique_song_keys.add(song_key)
@@ -420,10 +422,12 @@ def enrich_graph(
                 "labels": [],
                 "locations": [],
                 "associated_acts": [],
+                "stories": [],
                 "genres_source": None,
                 "labels_source": None,
                 "locations_source": None,
                 "associated_acts_source": None,
+                "stories_source": None,
             }
 
     def _safe_enrich_song(track_name: str, primary_artist: str) -> Dict:
@@ -492,63 +496,83 @@ def enrich_graph(
             artist_name = artist.get("name", "")
             if not artist_name:
                 continue
-            artist_key = _farmhash_key("artist", artist_name)
-            artist_id = upsert_node(nodes_map["artists"], artist_key, {"name": artist_name})
+            for split_name in normalization.split_artist_names(artist_name):
+                artist_key = _farmhash_key("artist", split_name)
+                artist_id = upsert_node(nodes_map["artists"], artist_key, {"name": split_name})
 
-            enrichment = artist_enrichment_cache.get(artist_name)
-            if enrichment is None:
-                enrichment = enrich_artist(artist_name)
-                artist_enrichment_cache[artist_name] = enrichment
+                enrichment = artist_enrichment_cache.get(split_name)
+                if enrichment is None:
+                    enrichment = enrich_artist(split_name)
+                    artist_enrichment_cache[split_name] = enrichment
 
-            for genre in enrichment.get("genres", []):
-                genre_key = _farmhash_key("genre", genre)
-                genre_id = upsert_node(nodes_map["genres"], genre_key, {"name": genre})
-                add_edge(
-                    edges_map["artists_genres"],
-                    artist_id,
-                    genre_id,
-                    "has_genre",
-                    enrichment.get("genres_source"),
-                )
-                artist_to_genres.setdefault(artist_id, set()).add(genre)
+                for genre in enrichment.get("genres", []):
+                    genre_key = _farmhash_key("genre", genre)
+                    genre_id = upsert_node(nodes_map["genres"], genre_key, {"name": genre})
+                    add_edge(
+                        edges_map["artists_genres"],
+                        artist_id,
+                        genre_id,
+                        "has_genre",
+                        enrichment.get("genres_source"),
+                    )
+                    artist_to_genres.setdefault(artist_id, set()).add(genre)
 
-            for location in enrichment.get("locations", []):
-                location_key = _farmhash_key("location", location)
-                location_id = upsert_node(nodes_map["locations"], location_key, {"name": location})
-                add_edge(
-                    edges_map["artists_locations"],
-                    artist_id,
-                    location_id,
-                    "from_location",
-                    enrichment.get("locations_source"),
-                )
-                artist_to_locations.setdefault(artist_id, set()).add(location)
+                for location in enrichment.get("locations", []):
+                    location_key = _farmhash_key("location", location)
+                    location_id = upsert_node(nodes_map["locations"], location_key, {"name": location})
+                    add_edge(
+                        edges_map["artists_locations"],
+                        artist_id,
+                        location_id,
+                        "from_location",
+                        enrichment.get("locations_source"),
+                    )
+                    artist_to_locations.setdefault(artist_id, set()).add(location)
 
-            for label in enrichment.get("labels", []):
-                label_key = _farmhash_key("label", label)
-                label_id = upsert_node(nodes_map["record_labels"], label_key, {"name": label})
-                add_edge(
-                    edges_map["artists_record_labels"],
-                    artist_id,
-                    label_id,
-                    "signed_to",
-                    enrichment.get("labels_source"),
-                )
-                artist_to_labels.setdefault(artist_id, set()).add(label)
+                for label in enrichment.get("labels", []):
+                    label_key = _farmhash_key("label", label)
+                    label_id = upsert_node(nodes_map["record_labels"], label_key, {"name": label})
+                    add_edge(
+                        edges_map["artists_record_labels"],
+                        artist_id,
+                        label_id,
+                        "signed_to",
+                        enrichment.get("labels_source"),
+                    )
+                    artist_to_labels.setdefault(artist_id, set()).add(label)
 
-            for act in enrichment.get("associated_acts", []):
-                playlist_act = _resolve_playlist_artist(act, playlist_artist_lookup)
-                if not playlist_act:
-                    continue
-                act_key = _farmhash_key("artist", playlist_act)
-                act_id = upsert_node(nodes_map["artists"], act_key, {"name": playlist_act})
-                add_edge(
-                    edges_map["artists_associated_acts"],
-                    artist_id,
-                    act_id,
-                    "associated_with",
-                    enrichment.get("associated_acts_source"),
-                )
+                for act in enrichment.get("associated_acts", []):
+                    playlist_act = _resolve_playlist_artist(act, playlist_artist_lookup)
+                    if not playlist_act:
+                        continue
+                    act_key = _farmhash_key("artist", playlist_act)
+                    act_id = upsert_node(nodes_map["artists"], act_key, {"name": playlist_act})
+                    add_edge(
+                        edges_map["artists_associated_acts"],
+                        artist_id,
+                        act_id,
+                        "associated_with",
+                        enrichment.get("associated_acts_source"),
+                    )
+
+                artist_payload = nodes_by_collection[nodes_map["artists"]][artist_key]
+                stories_payload = []
+                for story in enrichment.get("stories", []):
+                    body = (story.get("body") or "").strip()
+                    if not body:
+                        continue
+                    title = (story.get("title") or f"About {split_name}").strip()
+                    stories_payload.append(
+                        {
+                            "title": title,
+                            "body": body,
+                            "source": story.get("source"),
+                            "source_url": story.get("source_url"),
+                            "tags": story.get("tags") or [],
+                        }
+                    )
+                if stories_payload:
+                    artist_payload["stories"] = stories_payload
 
         if primary_artist:
             song_cache_key = f"{track_name}|{primary_artist}"

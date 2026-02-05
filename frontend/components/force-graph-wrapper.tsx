@@ -622,6 +622,20 @@ export function ForceGraphWrapper({
     return normalized;
   };
 
+  // Normalize a node or id to a stable string id
+  const getNodeIdValue = (nodeObj: any): string => {
+    if (nodeObj === null || nodeObj === undefined) return '';
+    if (typeof nodeObj === 'string' || typeof nodeObj === 'number') return String(nodeObj);
+    if (nodeObj.id !== undefined && nodeObj.id !== null) return String(nodeObj.id);
+    if (nodeObj._id !== undefined && nodeObj._id !== null) return String(nodeObj._id);
+    if (nodeObj.__threeObj?.userData?.id !== undefined && nodeObj.__threeObj?.userData?.id !== null) {
+      return String(nodeObj.__threeObj.userData.id);
+    }
+    if (nodeObj.name !== undefined && nodeObj.name !== null) return String(nodeObj.name);
+    if (nodeObj.label !== undefined && nodeObj.label !== null) return String(nodeObj.label);
+    return '';
+  };
+
   // Debug node connections with additional logging
   const debugNodeConnections = (nodeId: string) => {
     if (!graphData) {
@@ -1427,42 +1441,25 @@ export function ForceGraphWrapper({
   // Focus on a specific node by id (selection + camera)
   const focusOnNode = (nodeId: string) => {
     if (!graphData || !graphRef.current) return;
-    const node = graphData.nodes.find((n: any) => n.id === nodeId) ||
+    const node = graphData.nodes.find((n: any) => getNodeIdValue(n) === nodeId) ||
       graphData.nodes.find((n: any) => (n.name || '').toLowerCase() === nodeId.toLowerCase());
     if (!node) return;
+    if (selectedNode && getNodeIdValue(selectedNode) === nodeId) {
+      focusCameraOnNode(node);
+      return;
+    }
     handleNodeSelection(node, { skipFocus: true });
     focusCameraOnNode(node);
   };
 
   // Replace or enhance the handleNodeSelection function
   const handleNodeSelection = (node: any, options?: { skipFocus?: boolean }) => {
-    // Function to reliably extract a node's ID
-    const getNodeId = (nodeObj: any): string => {
-      if (!nodeObj) return '';
-      
-      // If it's a string, return it directly
-      if (typeof nodeObj === 'string') return nodeObj;
-      
-      // If it has an ID property, use that
-      if (nodeObj.id && typeof nodeObj.id === 'string') {
-        return nodeObj.id;
-      }
-      
-      // If it's a ThreeJS object with userData
-      if (nodeObj.__threeObj && nodeObj.__threeObj.userData) {
-        return nodeObj.__threeObj.userData.id || '';
-      }
-      
-      // Fallback
-      return '';
-    };
-    
     // Normalize the node ID
-    const nodeId = getNodeId(node);
+    const nodeId = getNodeIdValue(node);
     const prevSelectedNode = selectedNode;
     
     // Toggle selection state for the node
-    if (selectedNode && getNodeId(selectedNode) === nodeId) {
+    if (selectedNode && getNodeIdValue(selectedNode) === nodeId) {
       // Deselect current node
       setSelectedNode(null);
       setNodeConnections([]);
@@ -1497,7 +1494,7 @@ export function ForceGraphWrapper({
           // Regenerate cluster colors properly
           const coloredNodes = assignClusterColors(nodesToUse, true, useSemanticClusters);
           graphRef.current.nodeColor((node: any) => {
-            const coloredNode = coloredNodes.find((n: any) => getNodeId(n) === getNodeId(node));
+            const coloredNode = coloredNodes.find((n: any) => getNodeIdValue(n) === getNodeIdValue(node));
             return coloredNode?.color || '#76b900';
           });
         } else {
@@ -1533,8 +1530,8 @@ export function ForceGraphWrapper({
           const source = typeof link.source === 'object' ? link.source : { id: link.source };
           const target = typeof link.target === 'object' ? link.target : { id: link.target };
           
-          const sourceId = getNodeId(source);
-          const targetId = getNodeId(target);
+          const sourceId = getNodeIdValue(source);
+          const targetId = getNodeIdValue(target);
           
           if (sourceId === nodeId) {
             // Outgoing connection
@@ -1565,14 +1562,14 @@ export function ForceGraphWrapper({
         // Preserve cluster colors when highlighting nodes
         graphRef.current
           .nodeColor((n: any) => {
-            const nId = getNodeId(n);
+            const nId = getNodeIdValue(n);
             if (nId === nodeId) return '#ffcf00'; // Selected node: bright yellow
             if (connectedNodes.has(nId)) return '#ff6200'; // Connected nodes: orange
             
             // Preserve cluster colors if enabled, otherwise use default
             if (enableClusterColors) {
               // Find the original node data to get its cluster color
-              const originalNode = graphData.nodes.find((node: any) => getNodeId(node) === nId);
+              const originalNode = graphData.nodes.find((node: any) => getNodeIdValue(node) === nId);
               if (originalNode && originalNode.color) {
                 return originalNode.color;
               }
@@ -1616,10 +1613,14 @@ export function ForceGraphWrapper({
     try {
       // Use the current hover state from the ref to prevent recursive calls
       const isHovered = hoveredNodeRef.current === node;
-      const isSelected = selectedNode && node.id === selectedNode.id;
-      const isConnected = nodeConnections.some(conn => 
-        conn.target === node.id || conn.source === node.id
-      );
+      const nodeId = getNodeIdValue(node);
+      const selectedId = selectedNode ? getNodeIdValue(selectedNode) : '';
+      const isSelected = Boolean(selectedId) && nodeId === selectedId;
+      const isConnected = nodeConnections.some(conn => {
+        const sourceId = getNodeIdValue(conn.source);
+        const targetId = getNodeIdValue(conn.target);
+        return sourceId === nodeId || targetId === nodeId;
+      });
       
       // Default colors based on group
       const group = node.group || 'default';
@@ -2073,31 +2074,10 @@ export function ForceGraphWrapper({
     
     console.log("Effect triggered: Updating visual highlighting for selected node and connections");
     
-    // Helper function to extract ID reliably
-    const getNodeId = (nodeObj: any): string => {
-      if (!nodeObj) return '';
-      
-      // If it's a string, return it directly
-      if (typeof nodeObj === 'string') return nodeObj;
-      
-      // If it has an ID property, use that
-      if (nodeObj.id && typeof nodeObj.id === 'string') {
-        return nodeObj.id;
-      }
-      
-      // If it's a ThreeJS object with userData
-      if (nodeObj.__threeObj && nodeObj.__threeObj.userData) {
-        return nodeObj.__threeObj.userData.id || '';
-      }
-      
-      // Fallback
-      return '';
-    };
-    
     // Refresh the graph to update colors and highlighting
     try {
       // Get selected node ID for comparison
-      const selectedNodeId = selectedNode ? getNodeId(selectedNode) : null;
+      const selectedNodeId = selectedNode ? getNodeIdValue(selectedNode) : null;
       console.log("Selected node ID for highlighting:", selectedNodeId);
       
       // If no connections found but we have a selected node and graph data,
@@ -2198,8 +2178,8 @@ export function ForceGraphWrapper({
       
       // Collect all node IDs that are connected to the selected node
       nodeConnections.forEach(conn => {
-        const sourceId = getNodeId(conn.source);
-        const targetId = getNodeId(conn.target);
+        const sourceId = getNodeIdValue(conn.source);
+        const targetId = getNodeIdValue(conn.target);
         
         if (sourceId !== selectedNodeId) {
           connectedNodeIds.add(sourceId);
@@ -2213,7 +2193,7 @@ export function ForceGraphWrapper({
       graphRef.current
         .nodeColor((node: any) => {
           // Get reliable ID for comparison
-          const nodeId = getNodeId(node);
+          const nodeId = getNodeIdValue(node);
           
           const isSelected = selectedNodeId && nodeId === selectedNodeId;
           const baseColor = node.color || getNodeColor(node);
@@ -2224,8 +2204,8 @@ export function ForceGraphWrapper({
         .linkColor((link: any) => {
           // Highlight links connected to selected node
           if (selectedNodeId) {
-            const sourceId = getNodeId(link.source);
-            const targetId = getNodeId(link.target);
+            const sourceId = getNodeIdValue(link.source);
+            const targetId = getNodeIdValue(link.target);
             
             // Check if this link connects to the selected node
             const isDirectConnection = sourceId === selectedNodeId || targetId === selectedNodeId;
@@ -2247,8 +2227,8 @@ export function ForceGraphWrapper({
         .linkWidth((link: any) => {
           // Make selected links thicker
           if (selectedNodeId) {
-            const sourceId = getNodeId(link.source);
-            const targetId = getNodeId(link.target);
+            const sourceId = getNodeIdValue(link.source);
+            const targetId = getNodeIdValue(link.target);
             
             // Check if this link connects to the selected node
             const isDirectConnection = sourceId === selectedNodeId || targetId === selectedNodeId;
@@ -2269,7 +2249,7 @@ export function ForceGraphWrapper({
         })
         // Configure node labels to always show for selected node and its connections
         .nodeThreeObject((node: any) => {
-          const nodeId = getNodeId(node);
+          const nodeId = getNodeIdValue(node);
           const isSelected = selectedNodeId && nodeId === selectedNodeId;
           const isConnected = selectedNodeId && connectedNodeIds.has(nodeId);
           const group = new THREE.Group();
@@ -2288,8 +2268,8 @@ export function ForceGraphWrapper({
           // Only process if we have a selected node
           if (!selectedNodeId) return null;
           
-          const sourceId = getNodeId(link.source);
-          const targetId = getNodeId(link.target);
+          const sourceId = getNodeIdValue(link.source);
+          const targetId = getNodeIdValue(link.target);
           
           // Check if this link connects to the selected node
           const isDirectConnection = sourceId === selectedNodeId || targetId === selectedNodeId;

@@ -153,6 +153,14 @@ export default function Graph3DPage() {
     return rawId.includes("_songs/")
   }, [])
 
+  const isArtistNode = useCallback((node: any) => {
+    if (!node) return false
+    const group = String(node.group || node.type || "").toLowerCase()
+    if (group === "artists" || group === "artist") return true
+    const rawId = String(node._id || "")
+    return rawId.includes("_artists/")
+  }, [])
+
   const handleNodeSelect = useCallback((node: any | null) => {
     if (!node) {
       setSelectedNodeId(null)
@@ -205,6 +213,12 @@ export default function Graph3DPage() {
     const stories = selectedNodeData.stories
     return Array.isArray(stories) ? stories : []
   }, [selectedNodeData, isSongNode])
+
+  const selectedArtistStories = useMemo(() => {
+    if (!selectedNodeData || !isArtistNode(selectedNodeData)) return []
+    const stories = selectedNodeData.stories
+    return Array.isArray(stories) ? stories : []
+  }, [selectedNodeData, isArtistNode])
 
   // Handle clustering performance updates
   const handleClusteringUpdate = useCallback((metrics: PerformanceMetrics) => {
@@ -943,6 +957,53 @@ export default function Graph3DPage() {
                   <ScrollArea className="h-[60vh] pr-3">
                     <div className="space-y-4">
                       {selectedStories.map((story: any, index: number) => (
+                        <div key={`${story.title}-${index}`} className="space-y-2 border-b border-gray-800 pb-3 last:border-b-0">
+                          <div className="text-sm font-semibold">{story.title}</div>
+                          <div className="text-xs text-gray-300 leading-relaxed">{story.body}</div>
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-400">
+                            {story.source && <span>{story.source}</span>}
+                            {story.source_url && (
+                              <a
+                                href={story.source_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-blue-300 hover:text-blue-200 underline"
+                              >
+                                source
+                              </a>
+                            )}
+                            {Array.isArray(story.tags) && story.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {story.tags.slice(0, 4).map((tag: string) => (
+                                  <Badge key={tag} variant="outline" className="text-[10px] border-gray-600">
+                                    {tag}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {selectedArtistStories.length > 0 && (
+            <div className="absolute top-20 right-2 z-50 w-[360px] max-h-[80vh]">
+              <Card className="bg-black/90 border-gray-700 text-white">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Artist Stories</CardTitle>
+                  <CardDescription className="text-xs">
+                    {selectedNodeData?.name || "Selected artist"} • {selectedArtistStories.length} items
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <ScrollArea className="h-[60vh] pr-3">
+                    <div className="space-y-4">
+                      {selectedArtistStories.map((story: any, index: number) => (
                         <div key={`${story.title}-${index}`} className="space-y-2 border-b border-gray-800 pb-3 last:border-b-0">
                           <div className="text-sm font-semibold">{story.title}</div>
                           <div className="text-xs text-gray-300 leading-relaxed">{story.body}</div>
