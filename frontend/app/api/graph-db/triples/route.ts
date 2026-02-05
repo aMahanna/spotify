@@ -31,12 +31,16 @@ export async function GET() {
     }
 
     const data = await response.json();
-    const triples = Array.isArray(data?.triples) ? data.triples : [];
+    const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
+    const edges = Array.isArray(data?.edges) ? data.edges : [];
+    const triples = edges.length ? edgesToTriples(nodes, edges) : (Array.isArray(data?.triples) ? data.triples : []);
     const uniqueTriples = deduplicateTriples(triples);
 
     return NextResponse.json({
       success: true,
       triples: uniqueTriples,
+      nodes,
+      edges,
       count: uniqueTriples.length,
       databaseType: 'backend'
     });
@@ -70,6 +74,25 @@ function deduplicateTriples(triples: Triple[]): Triple[] {
   });
 }
 
+function edgesToTriples(nodes: any[], edges: any[]): Triple[] {
+  const nodeIdToName = new Map<string, string>();
+  nodes.forEach((node) => {
+    if (node?._id && node?.name) {
+      nodeIdToName.set(String(node._id), String(node.name));
+    }
+  });
+
+  return edges
+    .map((edge) => {
+      const subject = nodeIdToName.get(String(edge?._from || ""));
+      const object = nodeIdToName.get(String(edge?._to || ""));
+      const predicate = edge?.label ? String(edge.label) : "";
+      if (!subject || !object || !predicate) return null;
+      return { subject, predicate, object };
+    })
+    .filter(Boolean) as Triple[];
+}
+
 /**
  * API endpoint for storing triples in the selected graph database
  * POST /api/graph-db/triples
@@ -77,25 +100,29 @@ function deduplicateTriples(triples: Triple[]): Triple[] {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { triples, documentName } = body;
+    const { triples, nodes, edges, documentName } = body;
 
-    if (!triples || !Array.isArray(triples)) {
-      return NextResponse.json({ error: 'Triples are required' }, { status: 400 });
+    if ((!triples || !Array.isArray(triples)) && (!nodes || !Array.isArray(nodes) || !edges || !Array.isArray(edges))) {
+      return NextResponse.json({ error: 'Graph data is required' }, { status: 400 });
     }
 
-    const validTriples = triples.filter((triple: any) => {
-      return (
-        triple &&
-        typeof triple.subject === 'string' && triple.subject.trim() !== '' &&
-        typeof triple.predicate === 'string' && triple.predicate.trim() !== '' &&
-        typeof triple.object === 'string' && triple.object.trim() !== ''
-      );
-    }) as Triple[];
+    const validTriples = Array.isArray(triples)
+      ? triples.filter((triple: any) => {
+          return (
+            triple &&
+            typeof triple.subject === 'string' && triple.subject.trim() !== '' &&
+            typeof triple.predicate === 'string' && triple.predicate.trim() !== '' &&
+            typeof triple.object === 'string' && triple.object.trim() !== ''
+          );
+        }) as Triple[]
+      : [];
+    const nodeCount = Array.isArray(nodes) ? nodes.length : 0;
+    const edgeCount = Array.isArray(edges) ? edges.length : 0;
 
     return NextResponse.json({
       success: true,
-      message: 'Triples accepted for visualization',
-      count: validTriples.length,
+      message: 'Graph data accepted for visualization',
+      count: validTriples.length || edgeCount,
       documentName,
       databaseType: 'backend'
     });

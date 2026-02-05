@@ -20,14 +20,65 @@ import type React from "react"
 
 import { useState } from "react"
 import type { Triple } from "@/utils/text-processing"
+import type { NodeDocument, EdgeDocument } from "@/types/graph"
 import { GraphVisualization } from "./graph-visualization"
 
 export function GraphDataForm() {
-  const [triples, setTriples] = useState<Triple[]>([])
+  const [graphData, setGraphData] = useState<{ nodes: NodeDocument[]; edges: EdgeDocument[] } | null>(null)
   const [documentName, setDocumentName] = useState("")
   const [dataSubmitted, setDataSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [jsonInput, setJsonInput] = useState("")
+
+  const normalizeKey = (value: string) => {
+    const normalized = value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_:-]/g, "_")
+      .replace(/^_+|_+$/g, "")
+    return normalized || "node"
+  }
+
+  const buildGraphDocuments = (triples: Triple[]) => {
+    const nodesByName = new Map<string, NodeDocument>()
+    const keyCounts = new Map<string, number>()
+    const edges: EdgeDocument[] = []
+
+    const getNodeKey = (name: string) => {
+      if (nodesByName.has(name)) {
+        return nodesByName.get(name)!._key
+      }
+
+      const baseKey = normalizeKey(name)
+      const count = keyCounts.get(baseKey) || 0
+      const key = count === 0 ? baseKey : `${baseKey}_${count}`
+      keyCounts.set(baseKey, count + 1)
+
+      nodesByName.set(name, {
+        _key: key,
+        _id: `nodes/${key}`,
+        name
+      })
+
+      return key
+    }
+
+    triples.forEach((triple, index) => {
+      const sourceKey = getNodeKey(triple.subject)
+      const targetKey = getNodeKey(triple.object)
+      const edgeKey = `e${index + 1}`
+
+      edges.push({
+        _key: edgeKey,
+        _id: `edges/${edgeKey}`,
+        _from: `nodes/${sourceKey}`,
+        _to: `nodes/${targetKey}`,
+        label: triple.predicate
+      })
+    })
+
+    return { nodes: Array.from(nodesByName.values()), edges }
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -51,13 +102,15 @@ export function GraphDataForm() {
         }
       }
 
+      const parsedGraphData = buildGraphDocuments(parsedTriples)
+
       // Store in localStorage for persistence
-      localStorage.setItem("graphTriples", jsonInput)
+      localStorage.setItem("graphData", JSON.stringify(parsedGraphData))
       if (documentName) {
         localStorage.setItem("graphDocumentName", documentName)
       }
 
-      setTriples(parsedTriples)
+      setGraphData(parsedGraphData)
       setDataSubmitted(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to parse JSON data")
@@ -68,13 +121,13 @@ export function GraphDataForm() {
     setJsonInput(e.target.value)
   }
 
-  if (dataSubmitted) {
+  if (dataSubmitted && graphData) {
     return (
       <div className="h-[calc(100vh-400px)]">
         <h2 className="text-xl font-bold mb-4">
           Knowledge Graph: <span className="text-primary">{documentName || "Custom Data"}</span>
         </h2>
-        <GraphVisualization triples={triples} fullscreen />
+        <GraphVisualization nodes={graphData.nodes} edges={graphData.edges} fullscreen />
       </div>
     )
   }

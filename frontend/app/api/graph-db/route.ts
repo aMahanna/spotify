@@ -52,6 +52,28 @@ const buildGraphData = (triples: any[]) => {
   return { nodes: Array.from(nodesMap.values()), links }
 }
 
+const buildGraphDataFromEdges = (nodes: any[], edges: any[]) => {
+  const mappedNodes = nodes.map((node) => ({
+    id: String(node?._id || ''),
+    name: String(node?.name || ''),
+    label: String(node?.type || 'Entity'),
+    val: 1,
+    color: '#76b900'
+  })).filter((node) => node.id && node.name)
+
+  const links = edges
+    .map((edge) => {
+      const source = String(edge?._from || '').trim()
+      const target = String(edge?._to || '').trim()
+      const label = String(edge?.label || '').trim()
+      if (!source || !target || !label) return null
+      return { source, target, label }
+    })
+    .filter(Boolean) as { source: string; target: string; label: string }[]
+
+  return { nodes: mappedNodes, links }
+}
+
 /**
  * GET handler for retrieving graph data from the selected graph database
  */
@@ -64,12 +86,25 @@ export async function GET() {
     }
 
     const data = await response.json();
+    const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
+    const edges = Array.isArray(data?.edges) ? data.edges : [];
+
+    if (nodes.length && edges.length) {
+      const graphData = buildGraphDataFromEdges(nodes, edges)
+      return NextResponse.json({ 
+        nodes: graphData.nodes, 
+        links: graphData.links, 
+        connectionUrl: 'http://localhost:5000/api/graph',
+        databaseType: 'backend'
+      });
+    }
+
     const triples = Array.isArray(data?.triples) ? data.triples : [];
-    const { nodes, links } = buildGraphData(triples);
+    const graphData = buildGraphData(triples);
 
     return NextResponse.json({ 
-      nodes, 
-      links, 
+      nodes: graphData.nodes, 
+      links: graphData.links, 
       connectionUrl: 'http://localhost:5000/api/graph',
       databaseType: 'backend'
     });
@@ -90,16 +125,16 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     
     // Validate request body
-    if (!body.triples || !Array.isArray(body.triples)) {
+    if ((!body.triples || !Array.isArray(body.triples)) && (!body.nodes || !Array.isArray(body.nodes) || !body.edges || !Array.isArray(body.edges))) {
       return NextResponse.json(
-        { error: 'Invalid request: triples array is required' },
+        { error: 'Invalid request: graph data is required' },
         { status: 400 }
       );
     }
 
     return NextResponse.json({
       success: true,
-      message: `Accepted ${body.triples.length} triples for visualization`,
+      message: `Accepted ${body.triples?.length || body.edges?.length || 0} items for visualization`,
       databaseType: 'backend'
     });
   } catch (error) {

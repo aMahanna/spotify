@@ -19,10 +19,11 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { FallbackGraph } from "./fallback-graph"
 import { CuboidIcon as Cube, LayoutGrid } from "lucide-react"
-import type { Triple } from "@/utils/text-processing"
+import type { NodeDocument, EdgeDocument } from "@/types/graph"
 
 interface GraphVisualizationProps {
-  triples: Triple[]
+  nodes: NodeDocument[]
+  edges: EdgeDocument[]
   fullscreen?: boolean
   highlightedNodes?: string[]
   layoutType?: string
@@ -30,7 +31,8 @@ interface GraphVisualizationProps {
 }
 
 export function GraphVisualization({ 
-  triples, 
+  nodes,
+  edges,
   fullscreen = false,
   highlightedNodes = [],
   layoutType = "force",
@@ -100,23 +102,25 @@ export function GraphVisualization({
             // If we have a graph ID, we can just pass that
             iframeSrc = `/graph3d?id=${graphId}${baseParams}`;
           } else {
-            // For large triples data, try to use stored database triples first
-            const MAX_URL_TRIPLES = 100; // Maximum number of triples to include in URL
+            // For large edge data, try to use stored database data first
+            const MAX_URL_EDGES = 100; // Maximum number of edges to include in URL
+            const graphPayload = { nodes, edges }
             
-            if (triples.length > MAX_URL_TRIPLES) {
-              console.log(`Large dataset detected (${triples.length} triples), attempting to use stored database triples`);
+            if (edges.length > MAX_URL_EDGES) {
+              console.log(`Large dataset detected (${edges.length} edges), attempting to use stored database data`);
               
               // Try to store in database first, then use stored source
               fetch('/api/graph-db/triples', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
-                  triples: triples,
+                  nodes,
+                  edges,
                   documentName: 'Graph Visualization Data'
                 })
               }).then(response => {
                 if (response.ok) {
-                  console.log('Successfully stored triples in database, using stored source');
+                  console.log('Successfully stored graph data in database, using stored source');
                   // Update iframe to use stored source
                   if (iframeRef.current) {
                     iframeRef.current.src = `/graph3d?source=stored${baseParams}`;
@@ -126,36 +130,46 @@ export function GraphVisualization({
                   // Fallback to localStorage
                   const storageId = `graph_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
                   try {
-                    localStorage.setItem(storageId, JSON.stringify(triples));
-                    console.log(`Stored ${triples.length} triples in localStorage with ID: ${storageId}`);
+                    localStorage.setItem(storageId, JSON.stringify(graphPayload));
+                    console.log(`Stored ${edges.length} edges in localStorage with ID: ${storageId}`);
                     if (iframeRef.current) {
                       iframeRef.current.src = `/graph3d?storageId=${storageId}${baseParams}`;
                     }
                   } catch (storageError) {
                     console.error("Both database and localStorage failed:", storageError);
-                    console.warn(`Using limited triples (${MAX_URL_TRIPLES} of ${triples.length}) to avoid header size issues`);
-                    const limitedTriples = triples.slice(0, MAX_URL_TRIPLES);
+                    console.warn(`Using limited edges (${MAX_URL_EDGES} of ${edges.length}) to avoid header size issues`);
+                    const limitedEdges = edges.slice(0, MAX_URL_EDGES);
+                    const limitedNodeIds = new Set<string>([
+                      ...limitedEdges.map((edge) => edge._from),
+                      ...limitedEdges.map((edge) => edge._to)
+                    ]);
+                    const limitedNodes = nodes.filter((node) => limitedNodeIds.has(node._id));
                     if (iframeRef.current) {
-                      iframeRef.current.src = `/graph3d?triples=${encodeURIComponent(JSON.stringify(limitedTriples))}${baseParams}`;
+                      iframeRef.current.src = `/graph3d?nodes=${encodeURIComponent(JSON.stringify(limitedNodes))}&edges=${encodeURIComponent(JSON.stringify(limitedEdges))}${baseParams}`;
                     }
                   }
                 }
               }).catch(error => {
-                console.error('Error storing triples in database:', error);
+                console.error('Error storing graph data in database:', error);
                 // Fallback to localStorage
                 const storageId = `graph_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
                 try {
-                  localStorage.setItem(storageId, JSON.stringify(triples));
-                  console.log(`Stored ${triples.length} triples in localStorage with ID: ${storageId}`);
+                  localStorage.setItem(storageId, JSON.stringify(graphPayload));
+                  console.log(`Stored ${edges.length} edges in localStorage with ID: ${storageId}`);
                   if (iframeRef.current) {
                     iframeRef.current.src = `/graph3d?storageId=${storageId}${baseParams}`;
                   }
                 } catch (storageError) {
                   console.error("Both database and localStorage failed:", storageError);
-                  console.warn(`Using limited triples (${MAX_URL_TRIPLES} of ${triples.length}) to avoid header size issues`);
-                  const limitedTriples = triples.slice(0, MAX_URL_TRIPLES);
+                  console.warn(`Using limited edges (${MAX_URL_EDGES} of ${edges.length}) to avoid header size issues`);
+                  const limitedEdges = edges.slice(0, MAX_URL_EDGES);
+                  const limitedNodeIds = new Set<string>([
+                    ...limitedEdges.map((edge) => edge._from),
+                    ...limitedEdges.map((edge) => edge._to)
+                  ]);
+                  const limitedNodes = nodes.filter((node) => limitedNodeIds.has(node._id));
                   if (iframeRef.current) {
-                    iframeRef.current.src = `/graph3d?triples=${encodeURIComponent(JSON.stringify(limitedTriples))}${baseParams}`;
+                    iframeRef.current.src = `/graph3d?nodes=${encodeURIComponent(JSON.stringify(limitedNodes))}&edges=${encodeURIComponent(JSON.stringify(limitedEdges))}${baseParams}`;
                   }
                 }
               });
@@ -164,7 +178,7 @@ export function GraphVisualization({
               iframeSrc = `/graph3d?source=stored${baseParams}`;
             } else {
               // For small data sets, just use the URL parameter approach
-              iframeSrc = `/graph3d?triples=${encodeURIComponent(JSON.stringify(triples))}${baseParams}`;
+              iframeSrc = `/graph3d?nodes=${encodeURIComponent(JSON.stringify(nodes))}&edges=${encodeURIComponent(JSON.stringify(edges))}${baseParams}`;
             }
           }
           
@@ -188,7 +202,7 @@ export function GraphVisualization({
         };
       }
     }
-  }, [use3D, triples, fullscreen, handleIframeError, highlightedNodes, layoutType]);
+  }, [use3D, nodes, edges, fullscreen, handleIframeError, highlightedNodes, layoutType]);
   
   // Handle switching to 2D view
   const switchTo2D = () => {
@@ -251,7 +265,8 @@ export function GraphVisualization({
       ) : (
         <div className="relative h-full w-full">
           <FallbackGraph 
-            triples={triples} 
+            nodes={nodes}
+            edges={edges}
             fullscreen={fullscreen}
             highlightedNodes={highlightedNodes}
           />

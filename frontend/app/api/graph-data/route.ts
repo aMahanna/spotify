@@ -16,7 +16,7 @@
 //
 import { type NextRequest, NextResponse } from "next/server"
 
-const buildGraphData = (triples: any[]) => {
+const buildGraphDataFromTriples = (triples: any[]) => {
   const nodesMap = new Map<string, { id: string; name: string; group: string }>()
   const links: { source: string; target: string; name: string }[] = []
 
@@ -40,15 +40,29 @@ const buildGraphData = (triples: any[]) => {
   return { nodes: Array.from(nodesMap.values()), links }
 }
 
+const buildLinksFromEdges = (edges: any[]) => {
+  return edges
+    .map((edge) => {
+      const source = String(edge._from || '').trim()
+      const target = String(edge._to || '').trim()
+      const name = String(edge.label || '').trim()
+
+      if (!source || !target || !name) return null
+
+      return { source, target, name }
+    })
+    .filter(Boolean) as { source: string; target: string; name: string }[]
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const { triples, documentName } = await request.json()
+    const { nodes, edges, documentName } = await request.json()
 
-    if (!triples || !Array.isArray(triples)) {
-      return NextResponse.json({ error: "Invalid triples data" }, { status: 400 })
+    if (!nodes || !Array.isArray(nodes) || !edges || !Array.isArray(edges)) {
+      return NextResponse.json({ error: "Invalid graph data" }, { status: 400 })
     }
 
-    console.log(`Accepted graph data with ${triples.length} triples`)
+    console.log(`Accepted graph data with ${nodes.length} nodes and ${edges.length} edges`)
     return NextResponse.json({ graphId: "backend", documentName: documentName || "Backend Graph" })
   } catch (error) {
     console.error("Error storing graph data:", error)
@@ -65,12 +79,25 @@ export async function GET() {
     }
 
     const data = await response.json()
+    const nodes = Array.isArray(data?.nodes) ? data.nodes : []
+    const edges = Array.isArray(data?.edges) ? data.edges : []
+
+    if (nodes.length && edges.length) {
+      const links = buildLinksFromEdges(edges)
+      return NextResponse.json({
+        nodes,
+        edges,
+        links,
+        documentName: "Backend Graph"
+      })
+    }
+
     const triples = Array.isArray(data?.triples) ? data.triples : []
-    const { nodes, links } = buildGraphData(triples)
+    const { nodes: fallbackNodes, links } = buildGraphDataFromTriples(triples)
 
     return NextResponse.json({
       triples,
-      nodes,
+      nodes: fallbackNodes,
       links,
       documentName: "Backend Graph"
     })

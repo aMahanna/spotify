@@ -135,6 +135,8 @@ export default function Graph3DPage() {
         const params = new URLSearchParams(window.location.search)
         const graphId = params.get("id")
         const triplesParam = params.get("triples")
+        const nodesParam = params.get("nodes")
+        const edgesParam = params.get("edges")
         const layoutParam = params.get("layout")
         const highlightedNodesParam = params.get("highlightedNodes")
         const storageId = params.get("storageId")
@@ -162,6 +164,8 @@ export default function Graph3DPage() {
         console.log("URL parameters:", { 
           graphId: graphId || "not provided", 
           hasTriples: !!triplesParam,
+          hasNodes: !!nodesParam,
+          hasEdges: !!edgesParam,
           hasStorageId: !!storageId,
           layout: layoutParam || "default",
           highlightedNodes: highlightedNodesParam ? "provided" : "not provided",
@@ -182,14 +186,29 @@ export default function Graph3DPage() {
               return;
             }
             
-            const triples = JSON.parse(storedData);
-            console.log("Successfully retrieved triples from localStorage:", { 
-              count: triples.length,
-              sample: triples.slice(0, 2)
-            });
-            
-            setGraphData({ triples });
-            // setDebugInfo(`Using ${triples.length} triples from browser storage (ID: ${storageId})`);
+            const parsedData = JSON.parse(storedData);
+            if (Array.isArray(parsedData)) {
+              console.log("Successfully retrieved triples from localStorage:", { 
+                count: parsedData.length,
+                sample: parsedData.slice(0, 2)
+              });
+              setGraphData({ triples: parsedData });
+            } else if (parsedData?.nodes && parsedData?.edges) {
+              console.log("Successfully retrieved nodes/edges from localStorage:", { 
+                nodes: parsedData.nodes.length,
+                edges: parsedData.edges.length
+              });
+              const links = Array.isArray(parsedData.links) ? parsedData.links : parsedData.edges
+                .map((edge: any) => {
+                  if (!edge?._from || !edge?._to || !edge?.label) return null
+                  return { source: edge._from, target: edge._to, name: edge.label }
+                })
+                .filter(Boolean)
+              setGraphData({ nodes: parsedData.nodes, edges: parsedData.edges, links });
+            } else {
+              throw new Error("Invalid data in localStorage");
+            }
+            // setDebugInfo(`Using stored graph data from browser storage (ID: ${storageId})`);
             setIsLoading(false);
             
             // Clean up localStorage after retrieval to prevent buildup
@@ -212,6 +231,32 @@ export default function Graph3DPage() {
         }
         
         // If we have triples passed directly in the URL param
+        if (nodesParam && edgesParam) {
+          try {
+            console.log("Found nodes/edges data in URL parameters, attempting to parse")
+            const nodes = JSON.parse(decodeURIComponent(nodesParam))
+            const edges = JSON.parse(decodeURIComponent(edgesParam))
+            console.log("Successfully parsed nodes/edges from URL:", { 
+              nodeCount: nodes.length,
+              edgeCount: edges.length
+            });
+            const links = edges
+              .map((edge: any) => {
+                if (!edge?._from || !edge?._to || !edge?.label) return null
+                return { source: edge._from, target: edge._to, name: edge.label }
+              })
+              .filter(Boolean)
+            setGraphData({ nodes, edges, links })
+            setDebugInfo("Using nodes/edges data from URL parameters")
+            setIsLoading(false)
+            return
+          } catch (parseError) {
+            console.error("Error parsing nodes/edges from URL:", parseError)
+            setDebugInfo("Failed to parse nodes/edges from URL, falling back to API")
+            // Continue to other methods if parsing fails
+          }
+        }
+
         if (triplesParam) {
           try {
             console.log("Found triples data in URL parameter, attempting to parse")
@@ -237,7 +282,7 @@ export default function Graph3DPage() {
         
         if (graphId) {
           endpoint = `/api/graph-data?id=${graphId}`;
-        } else if (source === 'stored' || (!triplesParam && !storageId)) {
+        } else if (source === 'stored' || (!triplesParam && !nodesParam && !edgesParam && !storageId)) {
           // Use stored triples if explicitly requested or if no other data source is available
           endpoint = '/api/graph-db/triples';
           useStoredTriples = true;
@@ -275,9 +320,11 @@ export default function Graph3DPage() {
         console.log("API response received:", {
           dataExists: !!data,
           hasNodes: data && Array.isArray(data.nodes),
+          hasEdges: data && Array.isArray(data.edges),
           hasLinks: data && Array.isArray(data.links),
           hasTriples: data && Array.isArray(data.triples),
           nodeCount: data && Array.isArray(data.nodes) ? data.nodes.length : 0,
+          edgeCount: data && Array.isArray(data.edges) ? data.edges.length : 0,
           linkCount: data && Array.isArray(data.links) ? data.links.length : 0,
           tripleCount: data && Array.isArray(data.triples) ? data.triples.length : 0,
           dataType: typeof data,
@@ -291,6 +338,16 @@ export default function Graph3DPage() {
           throw new Error('No data received from API');
         }
         
+        // Normalize edges into links when needed
+        if (Array.isArray(data.edges) && Array.isArray(data.nodes) && !Array.isArray(data.links)) {
+          data.links = data.edges
+            .map((edge: any) => {
+              if (!edge?._from || !edge?._to || !edge?.label) return null
+              return { source: edge._from, target: edge._to, name: edge.label }
+            })
+            .filter(Boolean)
+        }
+
         // Handle stored triples response format
         if (useStoredTriples && data.triples && Array.isArray(data.triples)) {
           console.log("Processing stored triples from graph database");
@@ -299,16 +356,27 @@ export default function Graph3DPage() {
           setIsLoading(false);
           return;
         }
+
+        if (useStoredTriples && Array.isArray(data.nodes) && Array.isArray(data.edges)) {
+          console.log("Processing stored node/edge documents from graph database");
+          setGraphData({ nodes: data.nodes, edges: data.edges, links: data.links || [] });
+          setDebugInfo(`Using ${data.nodes.length} nodes and ${data.edges.length} edges from ${data.databaseType || 'graph database'}`);
+          setIsLoading(false);
+          return;
+        }
         
-        if ((!Array.isArray(data.nodes) || !Array.isArray(data.links)) && 
-            !Array.isArray(data.triples)) {
+        const hasNodeLinks = Array.isArray(data.nodes) && Array.isArray(data.links)
+        const hasNodeEdges = Array.isArray(data.nodes) && Array.isArray(data.edges)
+        const hasTriples = Array.isArray(data.triples)
+
+        if (!hasNodeLinks && !hasNodeEdges && !hasTriples) {
           setDebugInfo(`Invalid data format: ${Object.keys(data).join(", ")}`)
           throw new Error('Invalid graph data structure: missing required data arrays');
         }
         
-        if (Array.isArray(data.triples)) {
+        if (hasTriples) {
           setDebugInfo(`Using triples data (${data.triples.length} triples) from API`)
-        } else if (Array.isArray(data.nodes) && Array.isArray(data.links)) {
+        } else if (hasNodeLinks || hasNodeEdges) {
           setDebugInfo(`Using nodes/links data (${data.nodes.length} nodes, ${data.links.length} links) from API`)
         }
         

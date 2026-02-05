@@ -25,6 +25,22 @@ export interface Triple {
   usedFallback?: boolean
 }
 
+export interface NodeDocument {
+  _key: string
+  _id: string
+  name: string
+  type?: string
+}
+
+export interface EdgeDocument {
+  _key: string
+  _id?: string
+  _from: string
+  _to: string
+  label: string
+  type?: string
+}
+
 // Add this interface to the file
 export interface VectorDBStats {
   nodes: number;

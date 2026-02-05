@@ -17,13 +17,63 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Triple } from "@/types/graph";
+import { Triple, NodeDocument, EdgeDocument } from "@/types/graph";
 
 export default function DocumentsList() {
   const [loading, setLoading] = useState(true);
   const [triples, setTriples] = useState<Triple[]>([]);
   const [entities, setEntities] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const normalizeKey = (value: string) => {
+    const normalized = value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_:-]/g, "_")
+      .replace(/^_+|_+$/g, "")
+    return normalized || "node"
+  }
+
+  const buildGraphDocuments = (triples: Triple[]) => {
+    const nodesByName = new Map<string, NodeDocument>()
+    const keyCounts = new Map<string, number>()
+    const edges: EdgeDocument[] = []
+
+    const getNodeKey = (name: string) => {
+      if (nodesByName.has(name)) {
+        return nodesByName.get(name)!._key
+      }
+
+      const baseKey = normalizeKey(name)
+      const count = keyCounts.get(baseKey) || 0
+      const key = count === 0 ? baseKey : `${baseKey}_${count}`
+      keyCounts.set(baseKey, count + 1)
+
+      nodesByName.set(name, {
+        _key: key,
+        _id: `nodes/${key}`,
+        name
+      })
+
+      return key
+    }
+
+    triples.forEach((triple, index) => {
+      const sourceKey = getNodeKey(triple.subject)
+      const targetKey = getNodeKey(triple.object)
+      const edgeKey = `e${index + 1}`
+
+      edges.push({
+        _key: edgeKey,
+        _id: `edges/${edgeKey}`,
+        _from: `nodes/${sourceKey}`,
+        _to: `nodes/${targetKey}`,
+        label: triple.predicate
+      })
+    })
+
+    return { nodes: Array.from(nodesByName.values()), edges }
+  }
 
   useEffect(() => {
     async function fetchTriplesAndEntities() {
@@ -53,6 +103,7 @@ export default function DocumentsList() {
         
         // Store data in local storage, overwriting previous data
         localStorage.setItem("graphTriples", JSON.stringify(data.triples));
+        localStorage.setItem("graphData", JSON.stringify(buildGraphDocuments(data.triples)));
         localStorage.setItem("graphDocumentName", "sample_data.csv");
         
         // Update state
@@ -141,6 +192,7 @@ export default function DocumentsList() {
             <button
               onClick={() => {
                 localStorage.setItem("graphTriples", JSON.stringify(triples));
+                localStorage.setItem("graphData", JSON.stringify(buildGraphDocuments(triples)));
                 localStorage.setItem("graphDocumentName", "sample_data.csv");
                 alert(`Saved ${triples.length} triples to local storage. You can now view the graph visualization.`);
               }}

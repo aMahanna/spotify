@@ -16,7 +16,7 @@
 //
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { useDocuments } from "@/contexts/document-context"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { Download, Maximize, Minimize, Search as SearchIcon, CuboidIcon } from "lucide-react"
@@ -29,7 +29,7 @@ import { Label } from "@/components/ui/label"
 import { FallbackGraph } from "@/components/fallback-graph"
 import { GraphVisualization } from "@/components/graph-visualization"
 import { GraphToolbar } from "@/components/graph-toolbar"
-import { Triple } from "@/types/graph"
+import { Triple, NodeDocument, EdgeDocument } from "@/types/graph"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -72,6 +72,55 @@ export function KnowledgeGraphViewer() {
   const [loadingStoredTriples, setLoadingStoredTriples] = useState(false)
   const graphContainerRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+
+  const normalizeKey = (value: string) => {
+    const normalized = value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_:-]/g, "_")
+      .replace(/^_+|_+$/g, "")
+    return normalized || "node"
+  }
+
+  const documentGraph = useMemo(() => {
+    const keyCounts = new Map<string, number>()
+    const nodeKeyMap = new Map<string, string>()
+    const nodes: NodeDocument[] = []
+    const edges: EdgeDocument[] = []
+
+    graphData.nodes.forEach((node) => {
+      const baseKey = normalizeKey(node.id)
+      const count = keyCounts.get(baseKey) || 0
+      const key = count === 0 ? baseKey : `${baseKey}_${count}`
+      keyCounts.set(baseKey, count + 1)
+
+      nodeKeyMap.set(node.id, key)
+      nodes.push({
+        _key: key,
+        _id: `nodes/${key}`,
+        name: node.label,
+        type: node.group
+      })
+    })
+
+    graphData.edges.forEach((edge, index) => {
+      const sourceKey = nodeKeyMap.get(edge.source)
+      const targetKey = nodeKeyMap.get(edge.target)
+      if (!sourceKey || !targetKey) return
+
+      const edgeKey = `e${index + 1}`
+      edges.push({
+        _key: edgeKey,
+        _id: `edges/${edgeKey}`,
+        _from: `nodes/${sourceKey}`,
+        _to: `nodes/${targetKey}`,
+        label: edge.label,
+        type: edge.id
+      })
+    })
+
+    return { nodes, edges }
+  }, [graphData.nodes, graphData.edges])
 
   // Monitor fullscreen state changes
   useEffect(() => {
@@ -432,7 +481,8 @@ export function KnowledgeGraphViewer() {
               </div>
             ) : use3D ? (
               <GraphVisualization 
-                triples={getTriples()}
+                nodes={documentGraph.nodes}
+                edges={documentGraph.edges}
                 fullscreen={isFullscreen}
                 highlightedNodes={highlightedNodes}
                 layoutType={layoutType}
@@ -440,7 +490,8 @@ export function KnowledgeGraphViewer() {
               />
             ) : (
               <FallbackGraph 
-                triples={getTriples()} 
+                nodes={documentGraph.nodes} 
+                edges={documentGraph.edges}
                 fullscreen={isFullscreen}
               />
             )}

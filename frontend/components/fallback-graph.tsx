@@ -18,12 +18,13 @@
 
 import type React from "react"
 
-import { useEffect, useRef, useState, useCallback } from "react"
-import type { Triple } from "@/types/graph"
+import { useEffect, useRef, useState, useCallback, useMemo } from "react"
+import type { NodeDocument, EdgeDocument } from "@/types/graph"
 import { Maximize2, Minimize2, ZoomIn, ZoomOut, Move, Filter, Play, Pause } from "lucide-react"
 
 interface FallbackGraphProps {
-  triples: Triple[]
+  nodes: NodeDocument[]
+  edges: EdgeDocument[]
   fullscreen?: boolean
   highlightedNodes?: string[]
 }
@@ -53,13 +54,13 @@ interface GridCell {
   nodeIndices: number[];
 }
 
-export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }: FallbackGraphProps) {
+export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNodes }: FallbackGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(fullscreen)
   const [isBrowserFullscreen, setIsBrowserFullscreen] = useState(false)
   const [hoveredNode, setHoveredNode] = useState<string | null>(null)
-  const [selectedNode, setSelectedNode] = useState<string | null>(null)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
@@ -81,6 +82,14 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
   // Add state for CPU-based clustering
   const [cpuClustering, setCpuClustering] = useState<boolean>(false);
   const [gridCells, setGridCells] = useState<Map<string, GridCell>>(new Map());
+
+  const nodeLabelMap = useMemo(() => {
+    return new Map(nodes.map((node) => [node._id, node.name]))
+  }, [nodes])
+
+  const getNodeLabel = useCallback((nodeId: string) => {
+    return nodeLabelMap.get(nodeId) || nodeId
+  }, [nodeLabelMap])
 
   // Handle browser fullscreen changes
   useEffect(() => {
@@ -123,7 +132,7 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
   const handleResetView = useCallback(() => {
     setZoom(1)
     setOffset({ x: 0, y: 0 })
-    setSelectedNode(null)
+    setSelectedNodeId(null)
 
     // Restart simulation
     setSimulation((prev) => (prev ? { ...prev, isRunning: true, iteration: 0 } : null))
@@ -189,24 +198,25 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
 
   // Initialize the simulation with a subset of nodes
   useEffect(() => {
-    if (!triples.length) return
+    if (!nodes.length || !edges.length) return
 
     // Extract unique entities and count their connections
     const entityConnections = new Map<string, number>()
 
-    triples.forEach((triple) => {
-      // Count subject connections
-      if (entityConnections.has(triple.subject)) {
-        entityConnections.set(triple.subject, entityConnections.get(triple.subject)! + 1)
+    edges.forEach((edge) => {
+      const from = edge._from
+      const to = edge._to
+
+      if (entityConnections.has(from)) {
+        entityConnections.set(from, entityConnections.get(from)! + 1)
       } else {
-        entityConnections.set(triple.subject, 1)
+        entityConnections.set(from, 1)
       }
 
-      // Count object connections
-      if (entityConnections.has(triple.object)) {
-        entityConnections.set(triple.object, entityConnections.get(triple.object)! + 1)
+      if (entityConnections.has(to)) {
+        entityConnections.set(to, entityConnections.get(to)! + 1)
       } else {
-        entityConnections.set(triple.object, 1)
+        entityConnections.set(to, 1)
       }
     })
 
@@ -214,7 +224,7 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
     const sortedEntities = Array.from(entityConnections.entries()).sort((a, b) => b[1] - a[1])
 
     // Store total node count
-    setAllNodesCount(sortedEntities.length)
+    setAllNodesCount(nodes.length)
 
     // Show warning if we're limiting nodes
     setShowNodeLimitWarning(sortedEntities.length > nodeLimit)
@@ -226,13 +236,16 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
     const includedEntities = new Set(topEntities)
 
     // Create nodes
-    const nodes: Node[] = topEntities.map((id) => {
+    const nodeById = new Map(nodes.map((node) => [node._id, node]))
+    const simulationNodes: Node[] = topEntities.map((id) => {
       const connectionCount = entityConnections.get(id) || 0
-      const isHighlighted = highlightedNodes?.includes(id) || false
+      const nodeDoc = nodeById.get(id)
+      const label = nodeDoc?.name || id
+      const isHighlighted = highlightedNodes?.includes(label) || highlightedNodes?.includes(id) || false
 
       return {
         id,
-        label: id,
+        label,
         x: Math.random() * 800 - 400,
         y: Math.random() * 800 - 400,
         vx: 0,
@@ -244,24 +257,24 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
     })
 
     // Create links (only between included entities)
-    const links: Link[] = triples
-      .filter((triple) => includedEntities.has(triple.subject) && includedEntities.has(triple.object))
-      .map((triple) => ({
-        source: triple.subject,
-        target: triple.object,
-        label: triple.predicate,
+    const links: Link[] = edges
+      .filter((edge) => includedEntities.has(edge._from) && includedEntities.has(edge._to))
+      .map((edge) => ({
+        source: edge._from,
+        target: edge._to,
+        label: edge.label,
       }))
 
     setSimulation({
-      nodes,
+      nodes: simulationNodes,
       links,
       isRunning: !simulationPaused, // Use the simulationPaused state to determine initial running state
       iteration: 0,
     })
     
     // Apply CPU clustering after setting up the simulation
-    applyCpuClustering(nodes);
-  }, [triples, nodeLimit, simulationPaused, highlightedNodes])
+    applyCpuClustering(simulationNodes);
+  }, [nodes, edges, nodeLimit, simulationPaused, highlightedNodes])
 
   // Run the simulation with optimizations
   useEffect(() => {
@@ -488,8 +501,8 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
         if (
           (hoveredNode === source.id || 
            hoveredNode === target.id || 
-           selectedNode === source.id || 
-           selectedNode === target.id || 
+           selectedNodeId === source.id || 
+           selectedNodeId === target.id || 
            zoom > 2) && 
           link.label
         ) {
@@ -524,9 +537,9 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
       
       // Draw nodes
       simulation.nodes.forEach((node) => {
-        const isHighlighted = highlightedNodes?.includes(node.id) || false
+        const isHighlighted = highlightedNodes?.includes(node.label) || highlightedNodes?.includes(node.id) || false
         const isHovered = hoveredNode === node.id
-        const isSelected = selectedNode === node.id
+        const isSelected = selectedNodeId === node.id
         
         // Calculate position with zoom and pan
         const x = centerX + node.x * zoom
@@ -596,7 +609,7 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
     return () => {
       cancelAnimationFrame(animationFrameId)
     }
-  }, [simulation, hoveredNode, selectedNode, zoom, offset, cpuClustering, gridCells])
+  }, [simulation, hoveredNode, selectedNodeId, zoom, offset, cpuClustering, gridCells])
 
   // Handle canvas resize
   useEffect(() => {
@@ -688,10 +701,10 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
 
       if (clickedNode) {
         // Toggle selection if clicking on a node
-        if (selectedNode === clickedNode) {
-          setSelectedNode(null);
+        if (selectedNodeId === clickedNode) {
+          setSelectedNodeId(null);
         } else {
-          setSelectedNode(clickedNode);
+          setSelectedNodeId(clickedNode);
           console.log(`Selected node: ${clickedNode}`);
           console.log(`Node connections: ${simulation.links.filter((link) => link.source === clickedNode || link.target === clickedNode).length}`);
         }
@@ -729,7 +742,7 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
       canvas.removeEventListener("mouseleave", handleMouseUp)
       canvas.removeEventListener("wheel", handleWheel)
     }
-  }, [simulation, isDragging, dragStart, zoom, offset, selectedNode])
+  }, [simulation, isDragging, dragStart, zoom, offset, selectedNodeId])
 
   // Handle canvas resize when fullscreen changes
   useEffect(() => {
@@ -774,8 +787,8 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
             if (
               hoveredNode === sourceNode.id ||
               hoveredNode === targetNode.id ||
-              selectedNode === sourceNode.id ||
-              selectedNode === targetNode.id
+              selectedNodeId === sourceNode.id ||
+              selectedNodeId === targetNode.id
             ) {
               ctx.strokeStyle = "rgba(118, 185, 0, 0.6)"
               ctx.lineWidth = 2
@@ -811,8 +824,8 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
             if (
               hoveredNode === sourceNode.id ||
               hoveredNode === targetNode.id ||
-              selectedNode === sourceNode.id ||
-              selectedNode === targetNode.id
+              selectedNodeId === sourceNode.id ||
+              selectedNodeId === targetNode.id
             ) {
               const midX = (sx + tx) / 2
               const midY = (sy + ty) / 2
@@ -844,7 +857,7 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
           ctx.arc(x, y, radius, 0, Math.PI * 2)
 
           // Highlight hovered or selected node
-          if (node.id === hoveredNode || node.id === selectedNode) {
+          if (node.id === hoveredNode || node.id === selectedNodeId) {
             // Glow effect
             ctx.fillStyle = "#76B900"
           } else {
@@ -854,7 +867,7 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
           ctx.fill()
 
           // Draw node border
-          if (node.id === selectedNode) {
+          if (node.id === selectedNodeId) {
             ctx.strokeStyle = "white"
             ctx.lineWidth = 2
             ctx.stroke()
@@ -862,7 +875,7 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
 
           // Draw node label
           ctx.font =
-            node.id === hoveredNode || node.id === selectedNode
+            node.id === hoveredNode || node.id === selectedNodeId
               ? "bold 12px Inter, sans-serif"
               : "11px Inter, sans-serif"
 
@@ -872,7 +885,7 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
 
           // Always show labels for important nodes
           const isImportantNode = node.connections > 2
-          const isHighlightedNode = node.id === hoveredNode || node.id === selectedNode
+          const isHighlightedNode = node.id === hoveredNode || node.id === selectedNodeId
 
           if (isImportantNode || isHighlightedNode) {
             // Background for label
@@ -892,7 +905,7 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
 
       drawFullGraph()
     }
-  }, [isFullscreen, isBrowserFullscreen, simulation, zoom, offset, hoveredNode, selectedNode])
+  }, [isFullscreen, isBrowserFullscreen, simulation, zoom, offset, hoveredNode, selectedNodeId])
 
   // Add toggle function for simulation pause/play
   const toggleSimulation = useCallback(() => {
@@ -951,8 +964,8 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
               if (
                 hoveredNode === sourceNode.id ||
                 hoveredNode === targetNode.id ||
-                selectedNode === sourceNode.id ||
-                selectedNode === targetNode.id
+                selectedNodeId === sourceNode.id ||
+                selectedNodeId === targetNode.id
               ) {
                 ctx.strokeStyle = "rgba(118, 185, 0, 0.7)";
                 ctx.lineWidth = 2.5;
@@ -998,11 +1011,11 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
             ctx.arc(x, y, radius, 0, Math.PI * 2);
             
             // Highlight the selected node or nodes connected to the selected node
-            const isSelected = node.id === selectedNode;
-            const isConnectedToSelected = selectedNode && 
+            const isSelected = node.id === selectedNodeId;
+            const isConnectedToSelected = selectedNodeId && 
               simulation.links.some(
-                link => (link.source === selectedNode && link.target === node.id) || 
-                      (link.target === selectedNode && link.source === node.id)
+                link => (link.source === selectedNodeId && link.target === node.id) || 
+                      (link.target === selectedNodeId && link.source === node.id)
               );
             
             if (isSelected) {
@@ -1062,7 +1075,7 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
         drawFullGraph();
       }
     }
-  }, [selectedNode, simulation, zoom, offset, hoveredNode]);
+  }, [selectedNodeId, simulation, zoom, offset, hoveredNode]);
 
   return (
     <div className="relative h-full w-full" ref={containerRef}>
@@ -1167,11 +1180,11 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
         )}
 
         {/* Selected node info */}
-        {selectedNode && (
+        {selectedNodeId && (
           <div className="absolute top-2 left-2 bg-black/80 text-white text-sm px-4 py-3 rounded max-w-xs">
-            <h3 className="font-bold text-primary mb-1">{selectedNode}</h3>
+            <h3 className="font-bold text-primary mb-1">{getNodeLabel(selectedNodeId)}</h3>
             <div className="text-xs text-gray-300">
-              {simulation?.links.filter((link) => link.source === selectedNode || link.target === selectedNode)
+              {simulation?.links.filter((link) => link.source === selectedNodeId || link.target === selectedNodeId)
                 .length || 0}{" "}
               connections
             </div>
@@ -1179,13 +1192,13 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
               <div className="mb-2">
                 <div className="text-gray-400 text-xs uppercase mb-1">Outgoing</div>
                 {simulation?.links
-                  .filter((link) => link.source === selectedNode)
+                  .filter((link) => link.source === selectedNodeId)
                   .map((link, i) => (
                     <div key={`out-${i}`} className="flex items-center gap-1 mb-1">
                       <span className="text-gray-400">→</span>
                       <span className="text-primary">{link.label}</span>
                       <span className="text-gray-300">→</span>
-                      <span>{link.target}</span>
+                      <span>{getNodeLabel(link.target)}</span>
                     </div>
                   )) || <div className="text-gray-500 italic">None</div>}
               </div>
@@ -1193,19 +1206,20 @@ export function FallbackGraph({ triples, fullscreen = false, highlightedNodes }:
               <div>
                 <div className="text-gray-400 text-xs uppercase mb-1">Incoming</div>
                 {simulation?.links
-                  .filter((link) => link.target === selectedNode)
+                  .filter((link) => link.target === selectedNodeId)
                   .map((link, i) => (
                     <div key={`in-${i}`} className="flex items-center gap-1 mb-1">
-                      <span>{link.source}</span>
+                      <span>{getNodeLabel(link.source)}</span>
                       <span className="text-gray-300">→</span>
                       <span className="text-primary">{link.label}</span>
                       <span className="text-gray-400">→</span>
+                      <span>{getNodeLabel(link.target)}</span>
                     </div>
                   )) || <div className="text-gray-500 italic">None</div>}
               </div>
               
               <button 
-                onClick={() => setSelectedNode(null)}
+                onClick={() => setSelectedNodeId(null)}
                 className="mt-4 bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded text-xs"
               >
                 Clear selection

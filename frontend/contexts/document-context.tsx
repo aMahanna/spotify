@@ -20,6 +20,7 @@ import type React from "react"
 
 import { createContext, useContext, useState, useEffect } from "react"
 import { type Triple, processTextWithChunking, processTextWithChunkingPyG, triplesToGraph } from "@/utils/text-processing"
+import type { NodeDocument, EdgeDocument } from "@/types/graph"
 import { useRouter } from "next/navigation"
 import { toast } from "@/hooks/use-toast"
 import { type PromptConfigurations } from "@/components/prompt-configuration"
@@ -1015,7 +1016,58 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
       return
     }
 
+    const normalizeKey = (value: string) => {
+      const normalized = value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_:-]/g, "_")
+        .replace(/^_+|_+$/g, "")
+      return normalized || "node"
+    }
+
+    const buildGraphDocumentsFromTriples = (triples: Triple[]) => {
+      const nodesByName = new Map<string, NodeDocument>()
+      const keyCounts = new Map<string, number>()
+      const edges: EdgeDocument[] = []
+
+      const getNodeKey = (name: string) => {
+        if (nodesByName.has(name)) {
+          return nodesByName.get(name)!._key
+        }
+
+        const baseKey = normalizeKey(name)
+        const count = keyCounts.get(baseKey) || 0
+        const key = count === 0 ? baseKey : `${baseKey}_${count}`
+        keyCounts.set(baseKey, count + 1)
+
+        nodesByName.set(name, {
+          _key: key,
+          _id: `nodes/${key}`,
+          name
+        })
+
+        return key
+      }
+
+      triples.forEach((triple, index) => {
+        const sourceKey = getNodeKey(triple.subject)
+        const targetKey = getNodeKey(triple.object)
+        const edgeKey = `e${index + 1}`
+
+        edges.push({
+          _key: edgeKey,
+          _id: `edges/${edgeKey}`,
+          _from: `nodes/${sourceKey}`,
+          _to: `nodes/${targetKey}`,
+          label: triple.predicate
+        })
+      })
+
+      return { nodes: Array.from(nodesByName.values()), edges }
+    }
+
     try {
+      const graphDocuments = buildGraphDocumentsFromTriples(doc.triples)
       // Create a timestamp to ensure we have unique localStorage keys that don't conflict
       const timestamp = Date.now();
       
@@ -1023,13 +1075,15 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
       try {
         // Store with both the old keys (for backward compatibility) and new timestamped keys
         localStorage.setItem("graphTriples", JSON.stringify(doc.triples))
+        localStorage.setItem("graphData", JSON.stringify(graphDocuments))
         localStorage.setItem("graphDocumentName", doc.name)
         
         // Also store with timestamp for uniqueness
         localStorage.setItem(`graphTriples_${timestamp}`, JSON.stringify(doc.triples))
+        localStorage.setItem(`graphData_${timestamp}`, JSON.stringify(graphDocuments))
         localStorage.setItem(`graphDocumentName_${timestamp}`, doc.name)
         
-        console.log(`Stored ${doc.triples.length} triples in localStorage for document: ${doc.name}`)
+        console.log(`Stored graph data in localStorage for document: ${doc.name}`)
       } catch (localStorageError) {
         console.error("LocalStorage error:", localStorageError);
         alert("Warning: Unable to save graph data to browser storage. The graph may not persist if you navigate away.");
@@ -1044,7 +1098,8 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            triples: doc.triples,
+            nodes: graphDocuments.nodes,
+            edges: graphDocuments.edges,
             documentName: doc.name,
             timestamp // Include timestamp for correlation
           }),

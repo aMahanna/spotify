@@ -17,7 +17,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import type { Triple } from "@/utils/text-processing"
+import type { NodeDocument, EdgeDocument } from "@/types/graph"
 import { GraphVisualization } from "@/components/graph-visualization"
 import { NvidiaIcon } from "@/components/nvidia-icon"
 import { ArrowLeft, AlertCircle, Network } from "lucide-react"
@@ -26,7 +26,8 @@ import { useRouter } from "next/navigation"
 
 export default function GraphPage() {
   const router = useRouter()
-  const [triples, setTriples] = useState<Triple[]>([])
+  const [nodes, setNodes] = useState<NodeDocument[]>([])
+  const [edges, setEdges] = useState<EdgeDocument[]>([])
   const [documentName, setDocumentName] = useState<string>("")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -49,13 +50,21 @@ export default function GraphPage() {
         if (source !== "local") {
           try {
             console.log("Attempting to load graph data from backend")
-            const backendResponse = await fetch('/api/graph-db/triples')
+            const backendResponse = await fetch('/api/graph-data')
             
             if (backendResponse.ok) {
               const backendData = await backendResponse.json()
-              if (backendData.triples && Array.isArray(backendData.triples) && backendData.triples.length > 0) {
+              if (
+                backendData.nodes &&
+                Array.isArray(backendData.nodes) &&
+                backendData.edges &&
+                Array.isArray(backendData.edges) &&
+                backendData.nodes.length > 0 &&
+                backendData.edges.length > 0
+              ) {
                 console.log("Successfully loaded graph data from backend")
-                setTriples(backendData.triples)
+                setNodes(backendData.nodes)
+                setEdges(backendData.edges)
                 setDocumentName("Backend Graph")
                 setDataSource("api")
                 setLoading(false)
@@ -88,7 +97,8 @@ export default function GraphPage() {
             if (response.ok) {
               const data = await response.json()
               console.log("Successfully loaded graph data from API")
-              setTriples(data.triples)
+              setNodes(data.nodes || [])
+              setEdges(data.edges || [])
               setDocumentName(data.documentName)
               setDataSource("api")
               return
@@ -140,7 +150,8 @@ export default function GraphPage() {
       } catch (error) {
         console.error("Error loading graph data:", error)
         setError(error instanceof Error ? error.message : "Unknown error loading graph data")
-        setTriples([])
+        setNodes([])
+        setEdges([])
       } finally {
         setLoading(false)
       }
@@ -158,39 +169,42 @@ export default function GraphPage() {
         const timestamp = params.get("ts")
         
         // Try timestamped version first if timestamp is provided
-        let storedTriples = null
+        let storedGraphData = null
         let storedDocName = null
         
         if (timestamp) {
           console.log(`Looking for timestamped data with ts=${timestamp}`)
-          storedTriples = localStorage.getItem(`graphTriples_${timestamp}`)
+          storedGraphData = localStorage.getItem(`graphData_${timestamp}`)
           storedDocName = localStorage.getItem(`graphDocumentName_${timestamp}`)
         }
         
         // Fall back to non-timestamped version if timestamped version not found
-        if (!storedTriples) {
+        if (!storedGraphData) {
           console.log("Timestamped data not found or no timestamp provided, falling back to default keys")
-          storedTriples = localStorage.getItem("graphTriples")
+          storedGraphData = localStorage.getItem("graphData")
           storedDocName = localStorage.getItem("graphDocumentName")
         }
 
-        if (!storedTriples) {
-          console.warn("No triples data found in localStorage")
-          setTriples([])
+        if (!storedGraphData) {
+          console.warn("No graph data found in localStorage")
+          setNodes([])
+          setEdges([])
           setError("No graph data found in localStorage. Please return to the application and create a new graph.")
           return
         }
 
         try {
-          const parsedTriples = JSON.parse(storedTriples)
+          const parsedData = JSON.parse(storedGraphData)
           
-          if (!Array.isArray(parsedTriples)) {
-            setTriples([])
+          if (!parsedData || !Array.isArray(parsedData.nodes) || !Array.isArray(parsedData.edges)) {
+            setNodes([])
+            setEdges([])
             throw new Error("Invalid graph data format in localStorage")
           }
           
-          console.log(`Successfully parsed triples from localStorage: ${parsedTriples.length} items`)
-          setTriples(parsedTriples)
+          console.log(`Successfully parsed graph data from localStorage: ${parsedData.nodes.length} nodes, ${parsedData.edges.length} edges`)
+          setNodes(parsedData.nodes)
+          setEdges(parsedData.edges)
           setDataSource("local")
 
           if (storedDocName) {
@@ -200,12 +214,14 @@ export default function GraphPage() {
           }
         } catch (parseError) {
           console.error("Error parsing JSON from localStorage:", parseError)
-          setTriples([])
+          setNodes([])
+          setEdges([])
           throw new Error("The stored graph data appears to be corrupted. Please return to the application and create a new graph.")
         }
       } catch (localStorageError) {
         console.error("Error loading from localStorage:", localStorageError)
-        setTriples([])
+        setNodes([])
+        setEdges([])
         throw localStorageError instanceof Error 
           ? localStorageError 
           : new Error("Failed to load graph data from localStorage")
@@ -236,7 +252,7 @@ export default function GraphPage() {
     )
   }
 
-  if (error || triples.length === 0) {
+  if (error || nodes.length === 0 || edges.length === 0) {
     return (
       <div className="min-h-screen bg-background">
         <header className="border-b border-border/50 backdrop-blur-md bg-background/80 sticky top-0 z-50">
@@ -336,7 +352,7 @@ export default function GraphPage() {
         </div>
 
         <div className="glass-card rounded-xl overflow-hidden h-[calc(100vh-200px)]">
-          <GraphVisualization triples={triples} fullscreen />
+          <GraphVisualization nodes={nodes} edges={edges} fullscreen />
         </div>
       </main>
     </div>
