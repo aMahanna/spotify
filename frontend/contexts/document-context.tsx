@@ -23,7 +23,7 @@ import { type Triple, processTextWithChunking, processTextWithChunkingPyG, tripl
 import type { NodeDocument, EdgeDocument } from "@/types/graph"
 import { useRouter } from "next/navigation"
 import { toast } from "@/hooks/use-toast"
-import { type PromptConfigurations } from "@/components/prompt-configuration"
+type PromptConfigurations = Record<string, unknown>
 
 export type Document = {
   id: string
