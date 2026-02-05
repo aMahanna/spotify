@@ -73,6 +73,7 @@ interface ForceGraphWrapperProps {
   fullscreen?: boolean
   layoutType?: string
   highlightedNodes?: string[]
+  selectedNodeId?: string | null
   enableClustering?: boolean
   enableClusterColors?: boolean // Color nodes by cluster assignment
   clusteringMode?: 'local' | 'hybrid' | 'cpu' // Default clustering mode
@@ -338,7 +339,8 @@ export function ForceGraphWrapper({
   jsonData, 
   fullscreen = false, 
   layoutType, 
-  highlightedNodes, 
+  highlightedNodes,
+  selectedNodeId,
   enableClustering = false, 
   enableClusterColors = false, 
   clusteringMode = 'hybrid', 
@@ -1398,12 +1400,17 @@ export function ForceGraphWrapper({
     setTimeout(() => {
       if (graphRef.current) {
         try {
-          graphRef.current.centerAt(node.x, node.y, node.z, 800);
-          setTimeout(() => {
-            if (graphRef.current) {
-              graphRef.current.zoom(1.5, 800);
-            }
-          }, 100);
+          if (typeof graphRef.current.centerAt === "function") {
+            graphRef.current.centerAt(node.x, node.y, node.z, 800);
+          } else if (typeof graphRef.current.cameraPosition === "function") {
+            const camera = graphRef.current.camera?.();
+            const currentPos = camera
+              ? { x: camera.position.x, y: camera.position.y, z: camera.position.z }
+              : { x: node.x, y: node.y, z: node.z + 100 };
+            graphRef.current.cameraPosition(currentPos, node, 800);
+          } else {
+            console.warn("Graph focus API unavailable on current renderer");
+          }
         } catch (err) {
           console.warn("Error focusing on node:", err);
         }
@@ -1415,7 +1422,8 @@ export function ForceGraphWrapper({
   // Focus on a specific node by id (selection + camera)
   const focusOnNode = (nodeId: string) => {
     if (!graphData || !graphRef.current) return;
-    const node = graphData.nodes.find((n: any) => n.id === nodeId);
+    const node = graphData.nodes.find((n: any) => n.id === nodeId) ||
+      graphData.nodes.find((n: any) => (n.name || '').toLowerCase() === nodeId.toLowerCase());
     if (!node) return;
     handleNodeSelection(node, { skipFocus: true });
     focusCameraOnNode(node);
@@ -1589,7 +1597,7 @@ export function ForceGraphWrapper({
           })
           .refresh();
         
-        // Zoom to focus on the selected node (unless skipped)
+        // Pan to focus on the selected node (unless skipped)
         if (!options?.skipFocus) {
           focusCameraOnNode(node);
         }
@@ -2203,11 +2211,9 @@ export function ForceGraphWrapper({
           const nodeId = getNodeId(node);
           
           const isSelected = selectedNodeId && nodeId === selectedNodeId;
-          const isConnected = selectedNodeId && connectedNodeIds.has(nodeId);
           const baseColor = node.color || getNodeColor(node);
 
           if (isSelected) return baseColor; // Keep original node color
-          if (isConnected) return '#bd93f9'; // Purple for connected nodes
           return baseColor;
         })
         .linkColor((link: any) => {
@@ -2636,6 +2642,12 @@ export function ForceGraphWrapper({
       console.log("Initialized highlighted nodes from props:", highlightedNodes);
     }
   }, [highlightedNodes]);
+
+  useEffect(() => {
+    if (!selectedNodeId) return;
+    if (!graphData || !graphRef.current) return;
+    focusOnNode(selectedNodeId);
+  }, [selectedNodeId, graphData, isInitialized]);
   
   // Use effect to apply layout type from props
   useEffect(() => {

@@ -80,6 +80,9 @@ export default function Graph3DPage() {
   const [error, setError] = useState<string | null>(null)
   const [debugInfo, setDebugInfo] = useState<string>("")
   const [highlightedNodes, setHighlightedNodes] = useState<string[]>([])
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [searchTerm, setSearchTerm] = useState<string>("")
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false)
   const [layoutType, setLayoutType] = useState<string>("3d")
   const [useEnhancedWebGPU, setUseEnhancedWebGPU] = useState<boolean>(false)
   const [enableClustering, setEnableClustering] = useState<boolean>(true)
@@ -137,6 +140,28 @@ export default function Graph3DPage() {
     }
   }, [])
 
+  const handleSearch = useCallback(() => {
+    const term = searchTerm.trim().toLowerCase()
+    if (!term) {
+      setHighlightedNodes([])
+      setSelectedNodeId(null)
+      return
+    }
+    const nodes = Array.isArray(graphData?.nodes) ? graphData.nodes : []
+    const match = nodes.find((node: any) => {
+      const name = String(node?.name || node?.label || node?.id || "").toLowerCase()
+      return name.includes(term)
+    })
+    if (!match) {
+      setHighlightedNodes([])
+      setSelectedNodeId(null)
+      return
+    }
+    const nodeId = String(match.id || match._id || match.name)
+    setHighlightedNodes([nodeId])
+    setSelectedNodeId(nodeId)
+  }, [graphData, searchTerm])
+
   // Handle clustering performance updates
   const handleClusteringUpdate = useCallback((metrics: PerformanceMetrics) => {
     setPerformanceMetrics(metrics)
@@ -179,6 +204,8 @@ export default function Graph3DPage() {
         const edgesParam = params.get("edges")
         const layoutParam = params.get("layout")
         const highlightedNodesParam = params.get("highlightedNodes")
+        const selectedNodeParam = params.get("selectedNodeId") || params.get("selectedNode")
+        const fullscreenParam = params.get("fullscreen")
         const storageId = params.get("storageId")
         const source = params.get("source")
         
@@ -200,6 +227,10 @@ export default function Graph3DPage() {
             console.error("Failed to parse highlightedNodes from URL:", parseError)
           }
         }
+        if (selectedNodeParam) {
+          setSelectedNodeId(decodeURIComponent(selectedNodeParam))
+        }
+        setIsFullscreen(fullscreenParam !== "false")
         
         console.log("URL parameters:", { 
           graphId: graphId || "not provided", 
@@ -334,6 +365,14 @@ export default function Graph3DPage() {
           }
         }
         
+        if (source === "message") {
+          setGraphData(null);
+          setError(null);
+          setDebugInfo("Waiting for graph data from parent frame");
+          setIsLoading(true);
+          return;
+        }
+
         // Determine data source based on URL parameters
         let endpoint: string;
         let useStoredTriples = false;
@@ -464,6 +503,31 @@ export default function Graph3DPage() {
   }, [])
 
   useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const payload = event.data;
+      if (!payload) return;
+      if (payload.type === "graph-select") {
+        if (Array.isArray(payload.highlightedNodes)) {
+          setHighlightedNodes(payload.highlightedNodes);
+        }
+        if (typeof payload.selectedNodeId === "string" || payload.selectedNodeId === null) {
+          setSelectedNodeId(payload.selectedNodeId);
+        }
+        return;
+      }
+      if (payload.type === "graph-data" && payload.payload) {
+        setGraphData(normalizeGraphData(payload.payload));
+        setError(null);
+        setIsLoading(false);
+        setDebugInfo("");
+      }
+    };
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
+
+  useEffect(() => {
     // Add overflow: hidden to the body element when the component mounts
     document.body.style.overflow = "hidden"
 
@@ -518,6 +582,31 @@ export default function Graph3DPage() {
     <div className="h-screen w-screen overflow-hidden">
       {graphData && (
         <>
+          {isFullscreen && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50">
+              <div className="flex items-center gap-2 bg-gray-800/80 px-3 py-2 rounded text-xs text-gray-300 shadow">
+                <Input
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      handleSearch()
+                    }
+                  }}
+                  placeholder="Search nodes..."
+                  className="h-7 bg-gray-900/80 border-gray-700 text-xs text-gray-200 w-56"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleSearch}
+                  className="h-7 px-2 text-xs"
+                >
+                  Search
+                </Button>
+              </div>
+            </div>
+          )}
           {/* Controls Panel */}
           <div className="absolute top-20 left-2 z-50 flex flex-col gap-2 max-w-sm">
             {/* Main Controls Row */}
@@ -555,8 +644,6 @@ export default function Graph3DPage() {
             {debugInfo && (
               <div className="bg-gray-800/80 px-2 py-1 rounded text-xs text-gray-300">{debugInfo}</div>
             )}
-
-
             {/* Enhanced Clustering Controls Panel */}
             {showClusteringControls && (
               <Card className="bg-black/95 border-gray-700 text-white max-w-sm">
@@ -820,6 +907,7 @@ export default function Graph3DPage() {
                 jsonData={graphData} 
                 layoutType={layoutType}
                 highlightedNodes={highlightedNodes}
+                selectedNodeId={selectedNodeId || undefined}
                 enableClustering={enableClustering}
                 enableClusterColors={enableClusterColors}
                 clusteringMode="hybrid" // Default to Hybrid GPU/CPU mode

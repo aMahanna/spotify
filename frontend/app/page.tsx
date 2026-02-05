@@ -87,7 +87,7 @@ export default function Home() {
       }
     }
 
-    interval = setInterval(pollStatus, 1500)
+    interval = setInterval(pollStatus, 4000)
     pollStatus()
     return () => {
       isActive = false
@@ -134,7 +134,7 @@ export default function Home() {
       }
     }
 
-    interval = setInterval(pollStatus, 1500)
+    interval = setInterval(pollStatus, 4000)
     pollStatus()
     return () => {
       isActive = false

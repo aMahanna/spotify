@@ -67,6 +67,7 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], edges: [] })
   const [searchTerm, setSearchTerm] = useState("")
   const [highlightedNodes, setHighlightedNodes] = useState<string[]>([])
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [layoutType, setLayoutType] = useState<"force" | "hierarchical" | "radial">("force")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -214,7 +215,7 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
       }
     }
 
-    interval = setInterval(pollStatus, 1500)
+    interval = setInterval(pollStatus, 4000)
     pollStatus()
     return () => {
       isActive = false
@@ -305,15 +306,24 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
   const handleSearch = () => {
     if (!searchTerm) {
       setHighlightedNodes([])
+      setSelectedNodeId(null)
       return
     }
     
     const lowerSearchTerm = searchTerm.toLowerCase()
-    const matches = graphData.nodes.filter(node => 
-      node.label.toLowerCase().includes(lowerSearchTerm)
-    ).map(node => node.id)
-    
-    setHighlightedNodes(matches)
+    const matches = graphDocuments.nodes.filter((node) => {
+      const name = node.name?.toLowerCase() || ""
+      const id = node._id?.toLowerCase() || ""
+      return name.includes(lowerSearchTerm) || id.includes(lowerSearchTerm)
+    })
+    if (matches.length === 0) {
+      setHighlightedNodes([])
+      setSelectedNodeId(null)
+      return
+    }
+    const selected = matches[0]
+    setHighlightedNodes([selected._id])
+    setSelectedNodeId(selected._id)
   }
 
   const openFullscreen3D = () => {
@@ -321,6 +331,9 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
     params.set("layout", layoutType)
     if (highlightedNodes.length > 0) {
       params.set("highlightedNodes", JSON.stringify(highlightedNodes))
+    }
+    if (selectedNodeId) {
+      params.set("selectedNodeId", selectedNodeId)
     }
 
     if (graphId) {
@@ -498,6 +511,7 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
                 nodes={graphDocuments.nodes}
                 edges={graphDocuments.edges}
                 highlightedNodes={highlightedNodes}
+                selectedNodeId={selectedNodeId}
                 layoutType={layoutType}
               />
             )}

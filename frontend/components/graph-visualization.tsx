@@ -24,6 +24,7 @@ interface GraphVisualizationProps {
   edges: EdgeDocument[]
   fullscreen?: boolean
   highlightedNodes?: string[]
+  selectedNodeId?: string | null
   layoutType?: "force" | "hierarchical" | "radial"
 }
 
@@ -32,12 +33,14 @@ export function GraphVisualization({
   edges,
   fullscreen = false,
   highlightedNodes = [],
+  selectedNodeId = null,
   layoutType = "force"
 }: GraphVisualizationProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const loadTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const pendingGraphPayloadRef = useRef<{ nodes: NodeDocument[]; edges: EdgeDocument[] } | null>(null)
   
   // Handle 3D view errors that come from the iframe
   const handleIframeError = useCallback((event: MessageEvent) => {
@@ -68,6 +71,17 @@ export function GraphVisualization({
         setTimeout(() => {
           setIsLoading(false);
         }, 2000);
+
+        if (pendingGraphPayloadRef.current && iframeRef.current?.contentWindow) {
+          iframeRef.current.contentWindow.postMessage(
+            {
+              type: "graph-data",
+              payload: pendingGraphPayloadRef.current
+            },
+            window.location.origin
+          );
+          pendingGraphPayloadRef.current = null;
+        }
       };
       
       // Add the event listener
@@ -82,13 +96,8 @@ export function GraphVisualization({
           const params = new URLSearchParams(window.location.search);
           const graphId = params.get("id") || params.get("graph_id");
           
-          // Add highlighted nodes and layout type to the iframe parameters
-          const highlightedNodesParam = highlightedNodes.length > 0 
-            ? `&highlightedNodes=${encodeURIComponent(JSON.stringify(highlightedNodes))}` 
-            : '';
-          
           const timestamp = Date.now();
-          const baseParams = `&fullscreen=${fullscreen}&layout=${layoutType}${highlightedNodesParam}&t=${timestamp}`;
+          const baseParams = `&fullscreen=${fullscreen}&layout=${layoutType}&t=${timestamp}`;
           
           let iframeSrc = '';
           
@@ -101,8 +110,10 @@ export function GraphVisualization({
             try {
               localStorage.setItem(storageId, JSON.stringify(graphPayload));
               iframeSrc = `/graph3d?storageId=${storageId}${baseParams}`;
-            } catch (storageError) {
-              console.error("localStorage failed:", storageError);
+            } catch (storageError: any) {
+              if (storageError?.name !== "QuotaExceededError") {
+                console.error("localStorage failed:", storageError);
+              }
               try {
                 const response = await fetch("/api/graph-data", {
                   method: "POST",
@@ -121,18 +132,16 @@ export function GraphVisualization({
                 }
               } catch (apiError) {
                 console.error("API storage failed:", apiError);
-                // Fallback to URL parameters for very small payloads only
-                if (edges.length <= 50 && nodes.length <= 50) {
-                  iframeSrc = `/graph3d?nodes=${encodeURIComponent(JSON.stringify(nodes))}&edges=${encodeURIComponent(JSON.stringify(edges))}${baseParams}`;
-                } else {
-                  throw storageError;
-                }
+                pendingGraphPayloadRef.current = graphPayload;
+                iframeSrc = `/graph3d?source=message${baseParams}`;
               }
             }
           }
           
           // Set the iframe source
-          iframeRef.current.src = iframeSrc;
+          if (iframeRef.current) {
+            iframeRef.current.src = iframeSrc;
+          }
         } catch (err) {
           console.error("Error setting iframe source:", err);
           setError("Failed to prepare graph data for visualization");
@@ -153,7 +162,20 @@ export function GraphVisualization({
         window.removeEventListener('message', handleIframeError);
       };
     }
-  }, [nodes, edges, fullscreen, handleIframeError, highlightedNodes, layoutType]);
+  }, [nodes, edges, fullscreen, handleIframeError, layoutType]);
+
+  useEffect(() => {
+    const targetWindow = iframeRef.current?.contentWindow;
+    if (!targetWindow) return;
+    targetWindow.postMessage(
+      {
+        type: "graph-select",
+        highlightedNodes,
+        selectedNodeId
+      },
+      window.location.origin
+    );
+  }, [highlightedNodes, selectedNodeId]);
   
   return (
     <div className={`relative ${fullscreen ? "h-full" : "h-[500px]"}`}>
