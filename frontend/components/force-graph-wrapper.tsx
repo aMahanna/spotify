@@ -51,6 +51,14 @@ interface Connection {
   type?: 'incoming' | 'outgoing';
 }
 
+interface SelectedLinkInfo {
+  label: string;
+  sourceId: string;
+  targetId: string;
+  sourceName: string;
+  targetName: string;
+}
+
 interface PerformanceMetrics {
   renderingTime: number
   clusteringTime?: number
@@ -373,6 +381,7 @@ export function ForceGraphWrapper({
   const [debugInfo, setDebugInfo] = useState<string>("")
   const [selectedNode, setSelectedNode] = useState<NodeObject | null>(null)
   const [nodeConnections, setNodeConnections] = useState<Connection[]>([])
+  const [selectedLink, setSelectedLink] = useState<SelectedLinkInfo | null>(null)
   
   // Add interaction mode state to toggle between navigation and selection
   const [interactionMode, setInteractionMode] = useState<'navigation' | 'selection'>('navigation')
@@ -451,6 +460,31 @@ export function ForceGraphWrapper({
     notificationTimeoutRef.current = setTimeout(() => {
       setNotification(null);
     }, 3000);
+  };
+
+  const buildSelectedLinkInfo = (link: any): SelectedLinkInfo => {
+    const getLinkEndpointId = (endpoint: any): string => {
+      if (!endpoint) return '';
+      if (typeof endpoint === 'string') return endpoint;
+      if (endpoint.id) return endpoint.id;
+      if (endpoint.__threeObj?.userData?.id) return endpoint.__threeObj.userData.id;
+      return String(endpoint);
+    };
+
+    const sourceId = getLinkEndpointId(link.source);
+    const targetId = getLinkEndpointId(link.target);
+    const label = link.name || link.label || 'related';
+
+    const sourceNode = graphData?.nodes?.find((node: any) => getNodeId(node) === sourceId);
+    const targetNode = graphData?.nodes?.find((node: any) => getNodeId(node) === targetId);
+
+    return {
+      label,
+      sourceId,
+      targetId,
+      sourceName: sourceNode?.name || sourceId,
+      targetName: targetNode?.name || targetId
+    };
   };
   
   // Clean up notification timeout on unmount
@@ -926,7 +960,7 @@ export function ForceGraphWrapper({
             .nodeResolution(32) // Higher resolution for smoother nodes
             .nodeOpacity(0.8)
             .linkOpacity(0.2)
-            .linkWidth(1)
+            .linkWidth(2)
             .showNavInfo(false)
             .onBackgroundClick(() => {
               if (selectedNode) {
@@ -971,7 +1005,14 @@ export function ForceGraphWrapper({
             lastClickTime = now;
             
             console.log("Node click detected", node);
+            setSelectedLink(null);
             handleNodeSelection(node);
+          });
+
+          Graph.onLinkClick((link: any) => {
+            setSelectedNode(null);
+            setNodeConnections([]);
+            setSelectedLink(buildSelectedLinkInfo(link));
           });
           
           // Ready for data loading
@@ -1220,6 +1261,7 @@ export function ForceGraphWrapper({
   const clearSelection = () => {
     setSelectedNode(null);
     setNodeConnections([]);
+    setSelectedLink(null);
     
     // Restore cluster colors if enabled
     if (graphRef.current && enableClusterColors && graphData?.nodes) {
@@ -1258,7 +1300,7 @@ export function ForceGraphWrapper({
         return coloredNode?.color || '#76b900';
       });
       graphRef.current.linkColor(() => '#ffffff30');
-      graphRef.current.linkWidth(() => 1);
+      graphRef.current.linkWidth(() => 2);
       graphRef.current.refresh();
     }
     
@@ -1394,13 +1436,14 @@ export function ForceGraphWrapper({
         }
         
         graphRef.current.linkColor(() => '#ffffff30'); // Reset link colors too
-        graphRef.current.linkWidth(() => 1); // Reset to default width
+        graphRef.current.linkWidth(() => 2); // Reset to default width
         graphRef.current.refresh();
       }
       
       showNotification("Node deselected", "info");
     } else {
       // Select new node
+      setSelectedLink(null);
       setSelectedNode(node);
       
       if (graphRef.current) {
@@ -1485,7 +1528,6 @@ export function ForceGraphWrapper({
         focusOnNode(nodeId);
       }
       
-      showNotification(`Selected node: ${node.name || nodeId}`, "success");
     }
   };
 
@@ -2139,10 +2181,10 @@ export function ForceGraphWrapper({
             });
             
             if (isDirectConnection || isInConnectionsList) {
-              return 2.5; // Thicker for selected links
+              return 4; // Thicker for selected links
             }
           }
-          return 1; // Default link width
+          return 2; // Default link width
         })
         // Configure node labels to always show for selected node and its connections
         .nodeThreeObject((node: any) => {
@@ -2150,12 +2192,9 @@ export function ForceGraphWrapper({
           const isSelected = selectedNodeId && nodeId === selectedNodeId;
           const isConnected = selectedNodeId && connectedNodeIds.has(nodeId);
           const camera = graphRef.current.camera();
+          const labelOpacity = Math.max(0.08, getLabelOpacity(node, camera));
           
-          // Check if we should show the label
-          const showLabel = shouldShowLabel(node, camera, selectedNodeId, connectedNodeIds);
-          
-          if (isSelected || isConnected || showLabel) {
-            const group = new THREE.Group();
+          const group = new THREE.Group();
             
             // Create a sprite for the label
             const canvas = document.createElement('canvas');
@@ -2164,16 +2203,18 @@ export function ForceGraphWrapper({
             
             if (context) {
               // Set canvas size
-              canvas.width = 256;
-              canvas.height = 64;
+              canvas.width = 768;
+              canvas.height = 192;
               
               // Draw background
-              context.fillStyle = isSelected ? 'rgba(0, 128, 0, 0.8)' : 'rgba(0, 0, 0, 0.7)';
+              const bgAlpha = (isSelected ? 0.85 : 0.65) * labelOpacity;
+              context.fillStyle = `rgba(0, 0, 0, ${bgAlpha})`;
               context.fillRect(0, 0, canvas.width, canvas.height);
               
               // Draw text
-              context.font = isSelected ? 'bold 24px Arial' : '18px Arial';
-              context.fillStyle = isSelected ? '#ffffff' : '#ffffffcc';
+              context.font = isSelected ? 'bold 96px Arial' : '72px Arial';
+              const textAlpha = Math.max(0.15, labelOpacity);
+              context.fillStyle = `rgba(255, 255, 255, ${textAlpha})`;
               context.textAlign = 'center';
               context.textBaseline = 'middle';
               context.fillText(text, canvas.width / 2, canvas.height / 2);
@@ -2185,13 +2226,14 @@ export function ForceGraphWrapper({
               // Create sprite material and sprite
               const spriteMaterial = new THREE.SpriteMaterial({ 
                 map: texture,
-                transparent: true
+                transparent: true,
+                opacity: labelOpacity
               });
               const sprite = new THREE.Sprite(spriteMaterial);
               
               // Scale and position the sprite
-              sprite.scale.set(10, 2.5, 1);
-              sprite.position.set(0, node.val ? node.val + 5 : 8, 0);
+              sprite.scale.set(36, 9, 1);
+              sprite.position.set(0, node.val ? node.val + 10 : 16, 0);
               
               // Add to group
               group.add(sprite);
@@ -2204,10 +2246,6 @@ export function ForceGraphWrapper({
             }
             
             return group;
-          }
-          
-          // Return null for other nodes to use the default rendering
-          return null;
         })
         .nodeThreeObjectExtend(true)
         // Add link labels for connections to the selected node
@@ -2290,6 +2328,37 @@ export function ForceGraphWrapper({
       console.error("Error updating graph visual state:", error);
     }
   }, [selectedNode, nodeConnections, graphData]);
+
+  // Highlight selected link
+  useEffect(() => {
+    if (!graphRef.current) return;
+    if (!selectedLink) return;
+
+    const isSelectedLink = (link: any) => {
+      const sourceId = getNodeId(link.source);
+      const targetId = getNodeId(link.target);
+      const label = link.name || link.label || 'related';
+
+      const matchesDirection =
+        sourceId === selectedLink.sourceId && targetId === selectedLink.targetId;
+      const matchesReverse =
+        sourceId === selectedLink.targetId && targetId === selectedLink.sourceId;
+
+      return (matchesDirection || matchesReverse) && label === selectedLink.label;
+    };
+
+    graphRef.current
+      .linkWidth((link: any) => (isSelectedLink(link) ? 4 : 2))
+      .linkColor((link: any) => (isSelectedLink(link) ? '#00e5ff' : '#ffffff30'))
+      .nodeColor((node: any) => {
+        const nodeId = getNodeId(node);
+        if (nodeId === selectedLink.sourceId || nodeId === selectedLink.targetId) {
+          return '#00e5ff';
+        }
+        return '#76b900';
+      })
+      .refresh();
+  }, [selectedLink]);
 
   // Add a toggle for clustering
   const toggleClustering = () => {
@@ -2577,7 +2646,6 @@ export function ForceGraphWrapper({
     }
   }, [layoutType, graphRef.current, isInitialized]);
 
-  // Add this new method below the toggleInteractionMode function
   const createSelectionRing = (node: any) => {
     // Create a ring to highlight the selected node
     const ring = new THREE.Mesh(
@@ -2625,12 +2693,26 @@ export function ForceGraphWrapper({
       const hasHighConnectivity = node.val && node.val > 3;
       
       // Adjust these thresholds as needed
-      if (distance < 100 || hasHighConnectivity) {
+      if (distance < 220 || hasHighConnectivity) {
         return true;
       }
     }
     
     return false;
+  };
+
+  const getLabelOpacity = (node: any, camera: THREE.Camera) => {
+    if (!node || !camera || node.x === undefined || node.y === undefined || node.z === undefined) {
+      return 1;
+    }
+    const nodePosition = new THREE.Vector3(node.x, node.y, node.z);
+    const cameraPosition = camera.position.clone();
+    const distance = nodePosition.distanceTo(cameraPosition);
+    const near = 120;
+    const far = 1200;
+    if (distance <= near) return 1;
+    if (distance >= far) return 0;
+    return 1 - (distance - near) / (far - near);
   };
 
   // Add keyboard handling for node navigation
@@ -2767,7 +2849,7 @@ export function ForceGraphWrapper({
       graphRef.current
         .nodeResolution(8) // Lower resolution nodes
         .linkDirectionalParticles(0) // Disable particles
-        .linkWidth(0.5) // Thinner links
+        .linkWidth(1) // Thinner links
         .cooldownTime(1000) // Shorter physics simulation
         .d3AlphaDecay(0.05); // Faster convergence
       
@@ -2776,7 +2858,7 @@ export function ForceGraphWrapper({
       // Higher quality settings
       graphRef.current
         .nodeResolution(32) // Higher resolution nodes
-        .linkWidth(1) // Standard link width
+        .linkWidth(2) // Standard link width
         .cooldownTime(3000) // Longer physics simulation
         .d3AlphaDecay(0.02); // Standard convergence
       
@@ -2962,6 +3044,32 @@ export function ForceGraphWrapper({
             ) : (
               <p className="text-gray-400 italic">No connections found for this node.</p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Selected Link Panel */}
+      {selectedLink && (
+        <div className="absolute top-1/2 right-4 -translate-y-1/2 z-10 bg-gray-800/90 p-4 rounded-lg shadow-lg max-w-md text-sm text-gray-200 w-1/3">
+          <div className="flex justify-between items-center mb-3">
+            <h4 className="font-bold text-base text-white break-all">Selected Link</h4>
+            <button onClick={() => setSelectedLink(null)} className="text-gray-400 hover:text-white">
+              <X size={18} />
+            </button>
+          </div>
+          <div className="text-xs space-y-2">
+            <div>
+              <span className="font-semibold text-gray-300">Label:</span>{" "}
+              <span className="text-white">{selectedLink.label}</span>
+            </div>
+            <div>
+              <span className="font-semibold text-gray-300">Source:</span>{" "}
+              <span className="text-white">{selectedLink.sourceName}</span>
+            </div>
+            <div>
+              <span className="font-semibold text-gray-300">Target:</span>{" "}
+              <span className="text-white">{selectedLink.targetName}</span>
+            </div>
           </div>
         </div>
       )}
