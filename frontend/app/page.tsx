@@ -328,7 +328,7 @@ export default function Home() {
                   Enriching...
                 </span>
               ) : (
-                "Enrich Selected Graph"
+                "Enrich Graph"
               )}
             </Button>
             {enrichError && (

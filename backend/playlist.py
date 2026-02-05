@@ -88,6 +88,13 @@ def _artist_variants(value: str) -> set[str]:
     return variants
 
 
+def _split_artist_names(value: str) -> List[str]:
+    if not value:
+        return []
+    parts = [part.strip() for part in value.split(",")]
+    return [part for part in parts if part]
+
+
 def _resolve_playlist_artist(name: str, lookup: Dict[str, str]) -> str | None:
     for variant in _artist_variants(name):
         match = lookup.get(variant)
@@ -306,9 +313,10 @@ def build_and_upload_graph(
             artist_name = artist.get("name", "")
             if not artist_name:
                 continue
-            for variant in _artist_variants(artist_name):
-                if variant and variant not in playlist_artist_lookup:
-                    playlist_artist_lookup[variant] = artist_name
+            for split_name in _split_artist_names(artist_name):
+                for variant in _artist_variants(split_name):
+                    if variant and variant not in playlist_artist_lookup:
+                        playlist_artist_lookup[variant] = split_name
 
     for alias, canonical in ARTIST_ALIAS_OVERRIDES.items():
         normalized_alias = _normalize_name(alias)
@@ -384,11 +392,12 @@ def build_and_upload_graph(
             artist_name = artist.get("name", "")
             if not artist_name:
                 continue
-            artist_key = _farmhash_key("artist", artist_name)
-            artist_id = upsert_node(nodes_map["artists"], artist_key, {"name": artist_name})
-            add_edge(edges_map["artists_songs"], artist_id, song_id, "performed")
-            if album_id:
-                add_edge(edges_map["artists_albums"], artist_id, album_id, "contributed_to")
+            for split_name in _split_artist_names(artist_name):
+                artist_key = _farmhash_key("artist", split_name)
+                artist_id = upsert_node(nodes_map["artists"], artist_key, {"name": split_name})
+                add_edge(edges_map["artists_songs"], artist_id, song_id, "performed")
+                if album_id:
+                    add_edge(edges_map["artists_albums"], artist_id, album_id, "contributed_to")
 
         label_name = album.get("label", "")
         if label_name and album_id:
@@ -436,9 +445,10 @@ def enrich_graph(
             artist_name = artist.get("name", "")
             if not artist_name:
                 continue
-            normalized = _normalize_name(artist_name)
-            if normalized and normalized not in playlist_artist_lookup:
-                playlist_artist_lookup[normalized] = artist_name
+            for split_name in _split_artist_names(artist_name):
+                normalized = _normalize_name(split_name)
+                if normalized and normalized not in playlist_artist_lookup:
+                    playlist_artist_lookup[normalized] = split_name
 
     nodes_by_collection: Dict[str, Dict[str, Dict]] = {
         nodes_map["artists"]: {},
