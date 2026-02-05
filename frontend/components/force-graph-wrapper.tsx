@@ -409,6 +409,7 @@ export function ForceGraphWrapper({
   const [isClusteringAvailable, setIsClusteringAvailable] = useState<boolean>(false);
   // Track if clustering is enabled
   const [isClusteringEnabled, setIsClusteringEnabled] = useState<boolean>(false);
+  const defaultMouseButtonsRef = useRef<{ LEFT: number; MIDDLE: number; RIGHT: number } | null>(null);
 
   // Helper function to extract node ID reliably
   const getNodeId = (nodeObj: any): string => {
@@ -460,6 +461,58 @@ export function ForceGraphWrapper({
       }
     };
   }, []);
+
+  // Allow shift-drag to pan the 3D view
+  useEffect(() => {
+    if (!isInitialized || !graphRef.current?.controls) return;
+
+    const controls = graphRef.current.controls();
+    if (!controls) return;
+
+    if (!defaultMouseButtonsRef.current && controls.mouseButtons) {
+      defaultMouseButtonsRef.current = { ...controls.mouseButtons };
+    }
+
+    const setPanMode = (enabled: boolean) => {
+      if (!controls.mouseButtons) return;
+      controls.mouseButtons = {
+        LEFT: enabled ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.PAN
+      };
+    };
+
+    const isEditableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      return (
+        target.isContentEditable ||
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT"
+      );
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Shift" && !isEditableTarget(e.target)) {
+        setPanMode(true);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Shift") {
+        setPanMode(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      setPanMode(false);
+    };
+  }, [isInitialized]);
 
   // Toggle interaction mode
   const toggleInteractionMode = () => {
@@ -880,6 +933,21 @@ export function ForceGraphWrapper({
                 clearSelection();
               }
             });
+
+          // Enable panning in 3D controls
+          const controls = Graph.controls?.();
+          if (controls) {
+            controls.enablePan = true;
+            controls.screenSpacePanning = true;
+            controls.panSpeed = 0.05;
+            if (controls.mouseButtons) {
+              controls.mouseButtons = {
+                LEFT: THREE.MOUSE.ROTATE,
+                MIDDLE: THREE.MOUSE.DOLLY,
+                RIGHT: THREE.MOUSE.PAN
+              };
+            }
+          }
             
           // Setup safe hover handling to prevent recursion
           Graph.onNodeHover((node: any) => {
@@ -1211,6 +1279,11 @@ export function ForceGraphWrapper({
     } catch (err) {
       console.warn("Error in zoomToFit:", err);
     }
+  };
+
+  const resetView = () => {
+    clearSelection();
+    zoomToFit();
   };
 
   // Focus on a specific node with safety mechanism
@@ -2834,12 +2907,21 @@ export function ForceGraphWrapper({
         </button> */}
       </div>
 
+      <button
+        onClick={resetView}
+        className="absolute bottom-4 right-4 z-20 px-3 py-1.5 rounded text-white text-xs shadow bg-gray-700/80 hover:bg-gray-600/90 flex items-center gap-2"
+      >
+        <RefreshCw size={14} />
+        Reset View
+      </button>
+
       {/* Top-Right Info Panel */}
       <div className="absolute top-4 right-24 z-10 bg-gray-800/80 p-3 rounded text-xs text-gray-300 shadow w-48">
         <p><span className="font-semibold text-white">Mode:</span> {interactionMode}</p>
         <ul className="list-disc list-inside mt-1 space-y-0.5">
           <li>Drag to rotate view</li>
           <li>Scroll to zoom in/out</li>
+          <li>Shift+drag to pan</li>
         </ul>
         <p className="mt-2 pt-2 border-t border-gray-600/50"><span className="font-semibold text-white">Nodes:</span> {graphStats.nodes} &bull; <span className="font-semibold text-white">Links:</span> {graphStats.links}</p>
         <p className="mt-1"><span className="font-semibold text-white">WebGPU Clustering:</span> 
