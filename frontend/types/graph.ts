@@ -30,6 +30,7 @@ export interface NodeDocument {
   _id: string
   name: string
   type?: string
+  stories?: Story[]
 }
 
 export interface EdgeDocument {
@@ -39,6 +40,14 @@ export interface EdgeDocument {
   _to: string
   label: string
   type?: string
+}
+
+export interface Story {
+  title: string
+  body: string
+  source?: string
+  source_url?: string
+  tags?: string[]
 }
 
 // Add this interface to the file

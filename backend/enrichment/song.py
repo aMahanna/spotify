@@ -41,7 +41,7 @@ def enrich_song(
     normalized_artist = normalization.normalize_whitespace(artist)
     if not normalized_track or not normalized_artist:
         return {
-            "writers": [],
+            "songwriters": [],
             "producers": [],
             "featured_artists": [],
             # "moods": [],
@@ -50,7 +50,7 @@ def enrich_song(
             "contributors": [],
             "songdna_relations": [],
             "stories": [],
-            "writers_source": None,
+            "songwriters_source": None,
             "producers_source": None,
             "featured_artists_source": None,
             # "moods_source": None,
@@ -66,7 +66,7 @@ def enrich_song(
     lastfm_key = os.getenv(settings.LASTFM_API_KEY_ENV)
     audiodb_key = os.getenv(settings.AUDIODB_API_KEY_ENV)
 
-    writers: List[str] = []
+    songwriters: List[str] = []
     producers: List[str] = []
     featured_artists: List[str] = []
     # moods: List[str] = []
@@ -75,7 +75,7 @@ def enrich_song(
     contributors: List[dict] = []
     songdna_relations: List[dict] = []
     stories: List[dict] = []
-    writer_sources: set[str] = set()
+    songwriter_sources: set[str] = set()
     producer_sources: set[str] = set()
     feature_sources: set[str] = set()
     # mood_sources: set[str] = set()
@@ -103,8 +103,8 @@ def enrich_song(
                             {"name": target_artist, "role": rel_type, "source": "musicbrainz"}
                         )
                         contributor_sources.add("musicbrainz")
-                        writers.append(target_artist)
-                    writer_sources.add("musicbrainz")
+                        songwriters.append(target_artist)
+                    songwriter_sources.add("musicbrainz")
                 if rel_type in {"producer", "recording producer"}:
                     if target_artist:
                         contributors.append(
@@ -237,8 +237,9 @@ def enrich_song(
             song_payload = genius.song(song_id, genius_token, session) if song_id else {}
             timing.record_timing("genius", time.perf_counter() - started)
             if song_payload:
-                writers = normalization.unique(
-                    writers + [artist_item.get("name", "") for artist_item in song_payload.get("writer_artists", [])]
+                songwriters = normalization.unique(
+                    songwriters
+                    + [artist_item.get("name", "") for artist_item in song_payload.get("writer_artists", [])]
                 )
                 producers = normalization.unique(
                     producers + [artist_item.get("name", "") for artist_item in song_payload.get("producer_artists", [])]
@@ -263,7 +264,7 @@ def enrich_song(
                         contributors.append({"name": name, "role": "featured", "source": "genius"})
                         contributor_sources.add("genius")
                 if song_payload.get("writer_artists"):
-                    writer_sources.add("genius")
+                    songwriter_sources.add("genius")
                 if song_payload.get("producer_artists"):
                     producer_sources.add("genius")
                 if song_payload.get("featured_artists"):
@@ -355,7 +356,7 @@ def enrich_song(
                 extra={"track": normalized_track, "artist": normalized_artist},
             )
 
-    writers = normalization.unique(writers)
+    songwriters = normalization.unique(songwriters)
     producers = normalization.unique(producers)
     featured_artists = normalization.unique(featured_artists)
     # moods = normalization.unique(moods)
@@ -364,7 +365,7 @@ def enrich_song(
     contributors = normalization.unique_contributors(contributors)
 
     return {
-        "writers": writers,
+        "songwriters": songwriters,
         "producers": producers,
         "featured_artists": featured_artists,
         # "moods": moods,
@@ -373,7 +374,7 @@ def enrich_song(
         "contributors": contributors,
         "songdna_relations": songdna_relations,
         "stories": stories,
-        "writers_source": normalization.source_label(writer_sources),
+        "songwriters_source": normalization.source_label(songwriter_sources),
         "producers_source": normalization.source_label(producer_sources),
         "featured_artists_source": normalization.source_label(feature_sources),
         # "moods_source": normalization.source_label(mood_sources),

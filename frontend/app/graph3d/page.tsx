@@ -36,7 +36,7 @@
  * - /graph3d?source=local&triples=[{"subject":"A","predicate":"relates_to","object":"B"}]
  */
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useMemo } from "react"
 import dynamic from "next/dynamic"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -49,6 +49,7 @@ import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Separator } from "@/components/ui/separator"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Loader2, Cpu, Monitor, Settings, Brain, Layers, Zap, ChevronDown, ChevronRight } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { GraphLegend } from "@/components/graph-legend"
@@ -90,6 +91,7 @@ export default function Graph3DPage() {
   const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null)
   const [showClusteringControls, setShowClusteringControls] = useState<boolean>(false)
   const [clusteringOptionsExpanded, setClusteringOptionsExpanded] = useState<boolean>(false)
+  const [selectedNodeData, setSelectedNodeData] = useState<any | null>(null)
   
   // Semantic clustering options
   const [clusteringMethod, setClusteringMethod] = useState<string>("hybrid")
@@ -126,6 +128,9 @@ export default function Graph3DPage() {
         })
         .filter(Boolean)
     }
+    if (!links && Array.isArray(data.nodes)) {
+      links = []
+    }
     if (links) {
       links = links.map((link: any) => ({
         ...link,
@@ -138,6 +143,24 @@ export default function Graph3DPage() {
       nodes,
       links,
     }
+  }, [])
+
+  const isSongNode = useCallback((node: any) => {
+    if (!node) return false
+    const group = String(node.group || node.type || "").toLowerCase()
+    if (group === "songs" || group === "song") return true
+    const rawId = String(node._id || "")
+    return rawId.includes("_songs/")
+  }, [])
+
+  const handleNodeSelect = useCallback((node: any | null) => {
+    if (!node) {
+      setSelectedNodeId(null)
+      setSelectedNodeData(null)
+      return
+    }
+    setSelectedNodeId(String(node.id || node._id || node.name))
+    setSelectedNodeData(node)
   }, [])
 
   const handleSearch = useCallback(() => {
@@ -161,6 +184,27 @@ export default function Graph3DPage() {
     setHighlightedNodes([nodeId])
     setSelectedNodeId(nodeId)
   }, [graphData, searchTerm])
+
+  useEffect(() => {
+    if (!selectedNodeId) {
+      setSelectedNodeData(null)
+      return
+    }
+    const nodes = Array.isArray(graphData?.nodes) ? graphData.nodes : []
+    const normalizedSelected = selectedNodeId.toLowerCase().trim()
+    const match = nodes.find((node: any) => {
+      const id = String(node.id || node._id || "").toLowerCase().trim()
+      const name = String(node.name || node.label || "").toLowerCase().trim()
+      return id === normalizedSelected || name === normalizedSelected
+    })
+    setSelectedNodeData(match || null)
+  }, [selectedNodeId, graphData])
+
+  const selectedStories = useMemo(() => {
+    if (!selectedNodeData || !isSongNode(selectedNodeData)) return []
+    const stories = selectedNodeData.stories
+    return Array.isArray(stories) ? stories : []
+  }, [selectedNodeData, isSongNode])
 
   // Handle clustering performance updates
   const handleClusteringUpdate = useCallback((metrics: PerformanceMetrics) => {
@@ -885,6 +929,53 @@ export default function Graph3DPage() {
               </Card>
             )}
           </div>
+
+          {selectedStories.length > 0 && (
+            <div className="absolute top-20 right-2 z-50 w-[360px] max-h-[80vh]">
+              <Card className="bg-black/90 border-gray-700 text-white">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Stories</CardTitle>
+                  <CardDescription className="text-xs">
+                    {selectedNodeData?.name || "Selected song"} • {selectedStories.length} items
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <ScrollArea className="h-[60vh] pr-3">
+                    <div className="space-y-4">
+                      {selectedStories.map((story: any, index: number) => (
+                        <div key={`${story.title}-${index}`} className="space-y-2 border-b border-gray-800 pb-3 last:border-b-0">
+                          <div className="text-sm font-semibold">{story.title}</div>
+                          <div className="text-xs text-gray-300 leading-relaxed">{story.body}</div>
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-400">
+                            {story.source && <span>{story.source}</span>}
+                            {story.source_url && (
+                              <a
+                                href={story.source_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-blue-300 hover:text-blue-200 underline"
+                              >
+                                source
+                              </a>
+                            )}
+                            {Array.isArray(story.tags) && story.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {story.tags.slice(0, 4).map((tag: string) => (
+                                  <Badge key={tag} variant="outline" className="text-[10px] border-gray-600">
+                                    {tag}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            </div>
+          )}
           {((graphData.nodes && graphData.links && graphData.nodes.length > 0) || 
             (graphData.triples && graphData.triples.length > 0)) ? (
             useEnhancedWebGPU ? (
@@ -908,6 +999,7 @@ export default function Graph3DPage() {
                 layoutType={layoutType}
                 highlightedNodes={highlightedNodes}
                 selectedNodeId={selectedNodeId || undefined}
+                onNodeSelect={handleNodeSelect}
                 enableClustering={enableClustering}
                 enableClusterColors={enableClusterColors}
                 clusteringMode="hybrid" // Default to Hybrid GPU/CPU mode

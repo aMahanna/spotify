@@ -74,8 +74,9 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const graphId = searchParams.get("graph_id") || searchParams.get("id")
-    const backendUrl = graphId
-      ? `http://localhost:5000/api/graph?graph_id=${encodeURIComponent(graphId)}`
+    const normalizedGraphId = graphId === "backend" ? null : graphId
+    const backendUrl = normalizedGraphId
+      ? `http://localhost:5000/api/graph?graph_id=${encodeURIComponent(normalizedGraphId)}`
       : "http://localhost:5000/api/graph"
     const response = await fetch(backendUrl)
     if (!response.ok) {

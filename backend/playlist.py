@@ -435,7 +435,7 @@ def enrich_graph(
                 extra={"track": track_name, "artist": primary_artist},
             )
             return {
-                "writers": [],
+                "songwriters": [],
                 "producers": [],
                 "featured_artists": [],
                 "moods": [],
@@ -444,7 +444,7 @@ def enrich_graph(
                 "contributors": [],
                 "songdna_relations": [],
                 "stories": [],
-                "writers_source": None,
+                "songwriters_source": None,
                 "producers_source": None,
                 "featured_artists_source": None,
                 "moods_source": None,
@@ -557,7 +557,7 @@ def enrich_graph(
                 song_enrichment = enrich_song(track_name, primary_artist)
                 song_enrichment_cache[song_cache_key] = song_enrichment
 
-            for writer in song_enrichment.get("writers", []):
+            for writer in song_enrichment.get("songwriters", []):
                 writer_key = _farmhash_key("songwriter", writer)
                 writer_id = upsert_node(nodes_map["songwriters"], writer_key, {"name": writer})
                 add_edge(
@@ -565,7 +565,7 @@ def enrich_graph(
                     song_id,
                     writer_id,
                     "written_by",
-                    song_enrichment.get("writers_source"),
+                    song_enrichment.get("songwriters_source"),
                 )
 
             for producer in song_enrichment.get("producers", []):

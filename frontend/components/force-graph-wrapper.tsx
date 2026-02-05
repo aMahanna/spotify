@@ -74,6 +74,7 @@ interface ForceGraphWrapperProps {
   layoutType?: string
   highlightedNodes?: string[]
   selectedNodeId?: string | null
+  onNodeSelect?: (node: NodeObject | null) => void
   enableClustering?: boolean
   enableClusterColors?: boolean // Color nodes by cluster assignment
   clusteringMode?: 'local' | 'hybrid' | 'cpu' // Default clustering mode
@@ -341,6 +342,7 @@ export function ForceGraphWrapper({
   layoutType, 
   highlightedNodes,
   selectedNodeId,
+  onNodeSelect,
   enableClustering = false, 
   enableClusterColors = false, 
   clusteringMode = 'hybrid', 
@@ -1064,12 +1066,14 @@ export function ForceGraphWrapper({
             console.log("Node click detected", node);
             setSelectedLink(null);
             handleNodeSelection(node);
+            onNodeSelect?.(node);
           });
 
           Graph.onLinkClick((link: any) => {
             setSelectedNode(null);
             setNodeConnections([]);
             setSelectedLink(buildSelectedLinkInfo(link));
+            onNodeSelect?.(null);
           });
           
           // Ready for data loading
@@ -1326,6 +1330,7 @@ export function ForceGraphWrapper({
     setSelectedNode(null);
     setNodeConnections([]);
     setSelectedLink(null);
+    onNodeSelect?.(null);
     
     // Restore cluster colors if enabled
     if (graphRef.current && enableClusterColors && graphData?.nodes) {
