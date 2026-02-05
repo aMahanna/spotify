@@ -296,8 +296,8 @@ def build_and_upload_graph(
     _ensure_graph(db, graph_name, nodes_map, edges_map)
 
     playlist_name, tracks = _load_playlist(playlist_url)
-    if len(tracks) > 200:
-        raise ValueError(f"Playlist has {len(tracks)} tracks; expected at most 200.")
+    if len(tracks) > 50:
+        raise ValueError(f"Playlist has {len(tracks)} tracks; expected at most 50.")
 
     playlist_artist_lookup: Dict[str, str] = {}
     for item in tracks:
@@ -426,8 +426,8 @@ def enrich_graph(
     _ensure_graph(db, graph_name, nodes_map, edges_map)
 
     playlist_name, tracks = _load_playlist(playlist_url)
-    if len(tracks) > 200:
-        raise ValueError(f"Playlist has {len(tracks)} tracks; expected at most 200.")
+    if len(tracks) > 50:
+        raise ValueError(f"Playlist has {len(tracks)} tracks; expected at most 50.")
 
     playlist_artist_lookup: Dict[str, str] = {}
     for item in tracks:

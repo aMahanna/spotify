@@ -750,6 +750,26 @@ export function ForceGraphWrapper({
     return text.replace(/['"()]/g, '').trim();
   };
 
+  const normalizeGroupLabel = (value: any): string | null => {
+    if (typeof value !== "string") return null;
+    if (value.startsWith("g_") && value.includes("_")) {
+      const suffix = value.slice(value.lastIndexOf("_") + 1);
+      return suffix || "default";
+    }
+    return value || null;
+  };
+
+  const inferNodeGroup = (node: any): string => {
+    const rawId = node?._id || node?.id || "";
+    if (typeof rawId === "string" && rawId.includes("/")) {
+      return rawId.split("/")[0] || "default";
+    }
+    if (typeof rawId === "string" && rawId.startsWith("g_") && rawId.includes("_")) {
+      return rawId.slice(rawId.lastIndexOf("_") + 1) || "default";
+    }
+    return "default";
+  };
+
   // Process the JSON data into the format needed for the graph
   const processGraphData = async (data: any, applyClusteringFirst: boolean = false) => {
     console.log("processGraphData called with input:", {
@@ -823,7 +843,7 @@ export function ForceGraphWrapper({
           // Ensure node has all required properties and normalize the ID and name
           id: normalizedId,
           name: normalizedName,
-          group: node.group || node.type || "default"
+          group: normalizeGroupLabel(node.group) || normalizeGroupLabel(node.type) || inferNodeGroup(node)
         }
         return {
           ...normalizedNode,
@@ -1194,10 +1214,17 @@ export function ForceGraphWrapper({
         try {
           console.log("Configuring force physics...");
           const charge = currentGraphRef.d3Force('charge');
-          if (charge) charge.strength(-120);
+          if (charge) {
+            charge.strength(-220).distanceMax(500);
+          }
           
           const link = currentGraphRef.d3Force('link');
-          if (link) link.distance(60);
+          if (link) {
+            link.distance(120).strength(0.2);
+          }
+          
+          const collision = d3.forceCollide((node: any) => (node?.val ?? 4) * 1.4).iterations(2);
+          currentGraphRef.d3Force('collision', collision);
           console.log("Force physics configured");
         } catch (forceError) {
           console.warn("Non-critical error configuring forces:", forceError);
@@ -1860,13 +1887,18 @@ export function ForceGraphWrapper({
         // Force graph layout with parameters
         graph
           .d3Force('link')
-          .distance((link: any) => 80) // Adjust link distance
-          .strength((link: any) => 0.5); // Adjust link strength
+          .distance((link: any) => 120) // Increase spacing between nodes
+          .strength((link: any) => 0.2); // Looser link tension
         
         graph
           .d3Force('charge')
-          .strength(-120) // Adjust repulsive force
-          .distanceMax(300); // Max distance for repulsive force
+          .strength(-220) // Stronger repulsive force
+          .distanceMax(500); // Expand repulsion range
+        
+        graph.d3Force(
+          'collision',
+          d3.forceCollide((node: any) => (node?.val ?? 4) * 1.4).iterations(2)
+        );
         
         graph.graphData(data);
         graph
@@ -3004,11 +3036,20 @@ export function ForceGraphWrapper({
       {/* Selected Node Panel */}
       {selectedNode && (
         <div className="absolute top-1/2 left-4 -translate-y-1/2 z-10 bg-gray-800/90 p-4 rounded-lg shadow-lg max-w-md text-sm text-gray-200 w-1/3">
-          <div className="flex justify-between items-center mb-3">
+          <div className="flex justify-between items-center mb-1">
             <h4 className="font-bold text-base text-white break-all">Selected: {selectedNode.name || selectedNode.id}</h4>
             <button onClick={clearSelection} className="text-gray-400 hover:text-white">
               <X size={18} />
             </button>
+          </div>
+          <div className="text-xs text-gray-400 mb-3">
+            Type:{" "}
+            <span className="text-gray-200">
+              {normalizeGroupLabel(selectedNode.group) ||
+                normalizeGroupLabel((selectedNode as any).type) ||
+                inferNodeGroup(selectedNode) ||
+                "unknown"}
+            </span>
           </div>
           <div className="max-h-48 overflow-y-auto text-xs pr-2">
             {nodeConnections.length > 0 ? (

@@ -447,10 +447,12 @@ export default function Graph3DPage() {
         } else if (hasNodeLinks || hasNodeEdges) {
           setDebugInfo(`Using nodes/links data (${data.nodes.length} nodes, ${data.links.length} links) from API`)
         }
+
         
         console.log("Setting graph data in state...");
         setGraphData(normalizeGraphData(data))
         setIsLoading(false)
+        setDebugInfo("")
       } catch (err) {
         console.error('Failed to load graph data:', err)
         setError(`Failed to load graph data: ${err instanceof Error ? err.message : String(err)}`)
