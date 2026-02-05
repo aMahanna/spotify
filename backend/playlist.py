@@ -8,7 +8,8 @@ from spotify_scraper import SpotifyClient
 DB_NAME = "spotify"
 DB_PASSWORD = "test"
 PLAYLIST_NAME_FALLBACK = "playlist"
-GRAPH_NAME = "SpotifyKnowledgeGraph"
+GRAPH_NAME_PREFIX = "spotify_kg"
+GRAPH_JOBS_COLLECTION = "graph_jobs"
 PLAYLIST_URL = "https://open.spotify.com/playlist/37i9dQZEVXbNG2KDcFcKOF"
 
 # Node collections (snake_case)
@@ -28,6 +29,32 @@ ALBUMS_LABELS = "albums_record_labels"
 def _farmhash_key(prefix: str, raw: str) -> str:
     seed = f"{prefix}|{raw or 'unknown'}"
     return str(cityhash.CityHash64(seed))
+
+
+def _collection_prefix(graph_id: str) -> str:
+    return f"g_{graph_id}"
+
+
+def _graph_name(graph_id: str) -> str:
+    return f"{GRAPH_NAME_PREFIX}_{_collection_prefix(graph_id)}"
+
+
+def _collection_map(graph_id: str) -> Dict[str, Dict[str, str]]:
+    prefix = _collection_prefix(graph_id)
+    nodes = {
+        "artists": f"{prefix}_{ARTISTS_COLLECTION}",
+        "songs": f"{prefix}_{SONGS_COLLECTION}",
+        "albums": f"{prefix}_{ALBUMS_COLLECTION}",
+        "record_labels": f"{prefix}_{LABELS_COLLECTION}",
+        "playlists": f"{prefix}_{PLAYLISTS_COLLECTION}",
+    }
+    edges = {
+        "artists_songs": f"{prefix}_{ARTISTS_SONGS}",
+        "artists_albums": f"{prefix}_{ARTISTS_ALBUMS}",
+        "songs_albums": f"{prefix}_{SONGS_ALBUMS}",
+        "albums_record_labels": f"{prefix}_{ALBUMS_LABELS}",
+    }
+    return {"nodes": nodes, "edges": edges}
 
 
 def _load_playlist(playlist_url: str) -> Tuple[str, List[Dict]]:
@@ -55,85 +82,84 @@ def _truncate_collection(db, name: str) -> None:
         db.collection(name).truncate()
 
 
-def _reset_graph(db, node_collections: List[str], edge_collections: List[str]) -> None:
-    if db.has_graph(GRAPH_NAME):
-        db.delete_graph(GRAPH_NAME, drop_collections=True, ignore_missing=True)
+def _reset_graph(
+    db,
+    graph_name: str,
+    node_collections: List[str],
+    edge_collections: List[str],
+) -> None:
+    if db.has_graph(graph_name):
+        db.delete_graph(graph_name, drop_collections=True, ignore_missing=True)
     for collection in edge_collections:
         db.delete_collection(collection, ignore_missing=True)
     for collection in node_collections:
         db.delete_collection(collection, ignore_missing=True)
 
 
-def _ensure_graph(db) -> None:
-    if db.has_graph(GRAPH_NAME):
+def _ensure_graph(db, graph_name: str, nodes: Dict[str, str], edges: Dict[str, str]) -> None:
+    if db.has_graph(graph_name):
         return
     edge_definitions = [
         {
-            "edge_collection": ARTISTS_SONGS,
-            "from_vertex_collections": [ARTISTS_COLLECTION],
-            "to_vertex_collections": [SONGS_COLLECTION],
+            "edge_collection": edges["artists_songs"],
+            "from_vertex_collections": [nodes["artists"]],
+            "to_vertex_collections": [nodes["songs"]],
         },
         {
-            "edge_collection": ARTISTS_ALBUMS,
-            "from_vertex_collections": [ARTISTS_COLLECTION],
-            "to_vertex_collections": [ALBUMS_COLLECTION],
+            "edge_collection": edges["artists_albums"],
+            "from_vertex_collections": [nodes["artists"]],
+            "to_vertex_collections": [nodes["albums"]],
         },
         {
-            "edge_collection": SONGS_ALBUMS,
-            "from_vertex_collections": [SONGS_COLLECTION],
-            "to_vertex_collections": [ALBUMS_COLLECTION],
+            "edge_collection": edges["songs_albums"],
+            "from_vertex_collections": [nodes["songs"]],
+            "to_vertex_collections": [nodes["albums"]],
         },
         {
-            "edge_collection": ALBUMS_LABELS,
-            "from_vertex_collections": [ALBUMS_COLLECTION],
-            "to_vertex_collections": [LABELS_COLLECTION],
+            "edge_collection": edges["albums_record_labels"],
+            "from_vertex_collections": [nodes["albums"]],
+            "to_vertex_collections": [nodes["record_labels"]],
         },
     ]
     db.create_graph(
-        GRAPH_NAME,
+        graph_name,
         edge_definitions=edge_definitions,
         orphan_collections=[],
     )
 
 
 def build_and_upload_graph(
+    playlist_url: str,
+    graph_id: str,
     reset: bool = True,
-) -> Tuple[int, int]:
+) -> Tuple[int, int, Dict[str, Dict[str, str]]]:
     db = ArangoClient().db(DB_NAME, password=DB_PASSWORD)
-
-    node_collections = [
-        ARTISTS_COLLECTION,
-        SONGS_COLLECTION,
-        ALBUMS_COLLECTION,
-        LABELS_COLLECTION,
-        PLAYLISTS_COLLECTION,
-    ]
-    edge_collections = [
-        ARTISTS_SONGS,
-        ARTISTS_ALBUMS,
-        SONGS_ALBUMS,
-        ALBUMS_LABELS,
-    ]
+    graph_name = _graph_name(graph_id)
+    collection_map = _collection_map(graph_id)
+    nodes_map = collection_map["nodes"]
+    edges_map = collection_map["edges"]
+    node_collections = list(nodes_map.values())
+    edge_collections = list(edges_map.values())
 
     if reset:
-        _reset_graph(db, node_collections, edge_collections)
+        _reset_graph(db, graph_name, node_collections, edge_collections)
 
     for collection in node_collections:
         _ensure_collection(db, collection)
     for collection in edge_collections:
         _ensure_collection(db, collection, edge=True)
-    _ensure_graph(db)
+    _ensure_graph(db, graph_name, nodes_map, edges_map)
 
-    playlist_name, tracks = _load_playlist(PLAYLIST_URL)
-    if len(tracks) > 50:
-        raise ValueError(f"Playlist has {len(tracks)} tracks; expected at most 50.")
+    playlist_name, tracks = _load_playlist(playlist_url)
+    if len(tracks) > 200:
+        raise ValueError(f"Playlist has {len(tracks)} tracks; expected at most 200.")
 
     nodes_by_collection: Dict[str, Dict[str, Dict]] = {
-        ARTISTS_COLLECTION: {},
-        SONGS_COLLECTION: {},
-        ALBUMS_COLLECTION: {},
-        LABELS_COLLECTION: {},
-        PLAYLISTS_COLLECTION: {},
+        nodes_map["artists"]: {},
+        nodes_map["songs"]: {},
+        nodes_map["albums"]: {},
+        nodes_map["record_labels"]: {},
+        nodes_map["playlists"]: {},
     }
     edges_by_collection: Dict[str, List[Dict]] = {name: [] for name in edge_collections}
     edge_counters: Dict[str, int] = {name: 0 for name in edge_collections}
@@ -159,7 +185,7 @@ def build_and_upload_graph(
         )
 
     playlist_key = _farmhash_key("playlist", playlist_name)
-    upsert_node(PLAYLISTS_COLLECTION, playlist_key, {"name": playlist_name})
+    upsert_node(nodes_map["playlists"], playlist_key, {"name": playlist_name})
 
     for item in tracks:
         track = item.get("track", item) or {}
@@ -169,7 +195,7 @@ def build_and_upload_graph(
 
         song_key = _farmhash_key("song", track_uri or track_name)
         song_id = upsert_node(
-            SONGS_COLLECTION,
+            nodes_map["songs"],
             song_key,
             {"name": track_name, "track_uri": track_uri, "duration_ms": duration_ms},
         )
@@ -180,27 +206,27 @@ def build_and_upload_graph(
         if album_name:
             album_key = _farmhash_key("album", album_name)
             album_id = upsert_node(
-                ALBUMS_COLLECTION,
+                nodes_map["albums"],
                 album_key,
                 {"name": album_name, "release_date": album.get("release_date", "")},
             )
-            add_edge(SONGS_ALBUMS, song_id, album_id, "on_album")
+            add_edge(edges_map["songs_albums"], song_id, album_id, "on_album")
 
         for artist in track.get("artists", []) or []:
             artist_name = artist.get("name", "")
             if not artist_name:
                 continue
             artist_key = _farmhash_key("artist", artist_name)
-            artist_id = upsert_node(ARTISTS_COLLECTION, artist_key, {"name": artist_name})
-            add_edge(ARTISTS_SONGS, artist_id, song_id, "performed")
+            artist_id = upsert_node(nodes_map["artists"], artist_key, {"name": artist_name})
+            add_edge(edges_map["artists_songs"], artist_id, song_id, "performed")
             if album_id:
-                add_edge(ARTISTS_ALBUMS, artist_id, album_id, "contributed_to")
+                add_edge(edges_map["artists_albums"], artist_id, album_id, "contributed_to")
 
         label_name = album.get("label", "")
         if label_name and album_id:
             label_key = _farmhash_key("label", label_name)
-            label_id = upsert_node(LABELS_COLLECTION, label_key, {"name": label_name})
-            add_edge(ALBUMS_LABELS, album_id, label_id, "released_by")
+            label_id = upsert_node(nodes_map["record_labels"], label_key, {"name": label_name})
+            add_edge(edges_map["albums_record_labels"], album_id, label_id, "released_by")
 
     for collection, nodes in nodes_by_collection.items():
         if nodes:
@@ -211,9 +237,10 @@ def build_and_upload_graph(
 
     node_count = sum(db.collection(name).count() for name in nodes_by_collection)
     edge_count = sum(db.collection(name).count() for name in edge_collections)
-    return node_count, edge_count
+    collection_map["playlist_name"] = playlist_name
+    return node_count, edge_count, collection_map
 
 
 if __name__ == "__main__":
-    nodes, edges = build_and_upload_graph()
+    nodes, edges, _ = build_and_upload_graph(PLAYLIST_URL, "default")
     print(f"Uploaded {nodes} nodes and {edges} edges to ArangoDB.")

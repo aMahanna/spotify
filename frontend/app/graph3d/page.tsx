@@ -352,7 +352,7 @@ export default function Graph3DPage() {
         if (useStoredTriples && data.triples && Array.isArray(data.triples)) {
           console.log("Processing stored triples from graph database");
           setGraphData({ triples: data.triples });
-          setDebugInfo(`Using ${data.triples.length} stored triples from ${data.databaseType || 'graph database'}`);
+          setDebugInfo("");
           setIsLoading(false);
           return;
         }

@@ -46,7 +46,7 @@ if [ ! -d "node_modules" ]; then
     npm install
 fi
 
-echo "Starting frontend on http://localhost:3001..."
+echo "Starting frontend on http://localhost:3000..."
 npm run dev &
 FRONTEND_PID=$!
 
@@ -58,7 +58,7 @@ echo "txt2kg-minimal is running!"
 echo "=========================================="
 echo ""
 echo "  Backend:  http://localhost:5000"
-echo "  Frontend: http://localhost:3001"
+echo "  Frontend: http://localhost:3000"
 echo ""
 echo "Press Ctrl+C to stop both services"
 echo ""

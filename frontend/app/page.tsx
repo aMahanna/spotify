@@ -17,11 +17,131 @@
 "use client"
 
 import Link from "next/link"
-import { Network, CuboidIcon } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { Network, CuboidIcon, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { VisualizeTab } from "@/components/tabs/VisualizeTab"
+import { useRouter, useSearchParams } from "next/navigation"
 
 export default function Home() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const [playlistUrl, setPlaylistUrl] = useState("")
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [jobGraphId, setJobGraphId] = useState<string | null>(null)
+  const [jobStatus, setJobStatus] = useState<"idle" | "queued" | "running" | "ready" | "failed">("idle")
+  const [jobError, setJobError] = useState<string | null>(null)
+  const [availablePlaylists, setAvailablePlaylists] = useState<
+    { graph_id: string; playlist_url: string; playlist_name?: string }[]
+  >([])
+  const [selectedGraphId, setSelectedGraphId] = useState<string | null>(null)
+
+  const graphId = searchParams.get("graph_id")
+  const effectiveGraphId = graphId || selectedGraphId
+
+  const sortedPlaylists = useMemo(() => {
+    return [...availablePlaylists].filter((item) => item.graph_id)
+  }, [availablePlaylists])
+
+  useEffect(() => {
+    if (!jobId) return
+
+    let isActive = true
+    let interval: ReturnType<typeof setInterval> | null = null
+
+    const pollStatus = async () => {
+      try {
+        const response = await fetch(`http://localhost:5000/api/playlist/status/${jobId}`)
+        if (!response.ok) {
+          const text = await response.text()
+          throw new Error(text || `Status check failed: ${response.status}`)
+        }
+        const data = await response.json()
+        const status = data?.status as typeof jobStatus
+        if (!isActive) return
+        setJobStatus(status || "running")
+
+        if (status === "ready") {
+          const resolvedGraphId = data?.graph_id || jobGraphId
+          if (resolvedGraphId) {
+            router.replace(`/?graph_id=${resolvedGraphId}`)
+          }
+          if (interval) clearInterval(interval)
+          setJobId(null)
+        } else if (status === "failed") {
+          setJobError(data?.error || "Graph build failed")
+          if (interval) clearInterval(interval)
+          setJobId(null)
+        }
+      } catch (err) {
+        if (!isActive) return
+        setJobError(err instanceof Error ? err.message : "Failed to check job status")
+        setJobStatus("failed")
+        if (interval) clearInterval(interval)
+        setJobId(null)
+      }
+    }
+
+    interval = setInterval(pollStatus, 1500)
+    pollStatus()
+    return () => {
+      isActive = false
+      if (interval) clearInterval(interval)
+    }
+  }, [jobId, jobGraphId, router])
+
+  useEffect(() => {
+    const loadPlaylists = async () => {
+      try {
+        const response = await fetch("http://localhost:5000/api/playlists")
+        if (!response.ok) return
+        const data = await response.json()
+        const playlists = Array.isArray(data?.playlists) ? data.playlists : []
+        setAvailablePlaylists(playlists)
+      } catch {
+        setAvailablePlaylists([])
+      }
+    }
+    loadPlaylists()
+  }, [jobId, jobStatus])
+
+  const handlePlaylistSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setJobError(null)
+    setJobStatus("queued")
+    setJobId(null)
+    setJobGraphId(null)
+
+    try {
+      const response = await fetch("http://localhost:5000/api/playlist/build", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playlist_url: playlistUrl })
+      })
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(text || `Build request failed: ${response.status}`)
+      }
+      const data = await response.json()
+      setJobId(data?.job_id || null)
+      setJobGraphId(data?.graph_id || null)
+      setJobStatus("running")
+    } catch (err) {
+      setJobError(err instanceof Error ? err.message : "Failed to start build")
+      setJobStatus("failed")
+    }
+  }
+
+  const isBuilding = jobStatus === "queued" || jobStatus === "running"
+  const handleSelectChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = event.target.value
+    setSelectedGraphId(value || null)
+    if (value) {
+      router.replace(`/?graph_id=${value}`)
+    } else {
+      router.replace("/")
+    }
+  }
   return (
     <div className="min-h-screen bg-background text-foreground">
       <main className="container mx-auto px-6 py-12 space-y-8">
@@ -48,7 +168,64 @@ export default function Home() {
           </div>
         </div>
 
-        <VisualizeTab />
+        <div className="rounded-lg border border-border bg-card p-4">
+          <h2 className="text-lg font-semibold mb-2">Generate Graph from Playlist</h2>
+          <form onSubmit={handlePlaylistSubmit} className="flex flex-col gap-3 md:flex-row md:items-end">
+            <div className="flex-1">
+              <label htmlFor="playlist-url" className="block text-sm font-medium mb-1">
+                Playlist URL
+              </label>
+              <input
+                id="playlist-url"
+                type="url"
+                required
+                value={playlistUrl}
+                onChange={(event) => setPlaylistUrl(event.target.value)}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                placeholder="https://open.spotify.com/playlist/..."
+              />
+            </div>
+            <Button type="submit" disabled={isBuilding}>
+              {isBuilding ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Building...
+                </span>
+              ) : (
+                "Build Graph"
+              )}
+            </Button>
+          </form>
+          {isBuilding && (
+            <p className="text-sm text-muted-foreground mt-2">
+              Building knowledge graph… this may take a moment.
+            </p>
+          )}
+          {jobError && (
+            <p className="text-sm text-destructive mt-2">{jobError}</p>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-border bg-card p-4">
+          <label htmlFor="graph-selector" className="block text-sm font-medium mb-2">
+            Select a saved playlist
+          </label>
+          <select
+            id="graph-selector"
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            value={effectiveGraphId || ""}
+            onChange={handleSelectChange}
+          >
+            <option value="">Most recent</option>
+            {sortedPlaylists.map((item) => (
+              <option key={item.graph_id} value={item.graph_id}>
+                {item.playlist_name || item.playlist_url || item.graph_id}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <VisualizeTab graphId={effectiveGraphId || undefined} />
       </main>
     </div>
   )

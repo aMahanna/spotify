@@ -50,7 +50,8 @@ export default function GraphPage() {
         if (source !== "local") {
           try {
             console.log("Attempting to load graph data from backend")
-            const backendResponse = await fetch('/api/graph-data')
+            const backendEndpoint = graphId ? `/api/graph-data?id=${graphId}` : '/api/graph-data'
+            const backendResponse = await fetch(backendEndpoint)
             
             if (backendResponse.ok) {
               const backendData = await backendResponse.json()

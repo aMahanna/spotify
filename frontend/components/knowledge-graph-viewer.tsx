@@ -57,7 +57,11 @@ type GraphData = {
   edges: Edge[]
 }
 
-export function KnowledgeGraphViewer() {
+type KnowledgeGraphViewerProps = {
+  graphId?: string
+}
+
+export function KnowledgeGraphViewer({ graphId }: KnowledgeGraphViewerProps) {
   const { documents } = useDocuments()
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], edges: [] })
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -157,7 +161,8 @@ export function KnowledgeGraphViewer() {
 
       try {
         setLoadingStoredTriples(true)
-        const response = await fetch('/api/graph-db/triples')
+        const endpoint = graphId ? `/api/graph-db/triples?graph_id=${encodeURIComponent(graphId)}` : '/api/graph-db/triples'
+        const response = await fetch(endpoint)
         
         if (response.ok) {
           const data = await response.json()
@@ -176,7 +181,7 @@ export function KnowledgeGraphViewer() {
     }
 
     fetchStoredTriples()
-  }, [includeStoredTriples])
+  }, [includeStoredTriples, graphId])
 
   // Generate combined graph data from all processed documents and stored triples
   useEffect(() => {

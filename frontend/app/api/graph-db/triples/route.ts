@@ -21,9 +21,14 @@ import type { Triple } from '@/types/graph';
  * API endpoint for fetching all triples from the selected graph database
  * GET /api/graph-db/triples
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const response = await fetch('http://localhost:5000/api/graph');
+    const { searchParams } = new URL(req.url);
+    const graphId = searchParams.get("graph_id") || searchParams.get("id");
+    const backendUrl = graphId
+      ? `http://localhost:5000/api/graph?graph_id=${encodeURIComponent(graphId)}`
+      : 'http://localhost:5000/api/graph';
+    const response = await fetch(backendUrl);
 
     if (!response.ok) {
       const errorText = await response.text();
