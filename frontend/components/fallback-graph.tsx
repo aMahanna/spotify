@@ -21,7 +21,7 @@ import type React from "react"
 import { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import type { NodeDocument, EdgeDocument } from "@/types/graph"
 import { getEdgeColor, getNodeColor } from "@/lib/collection-colors"
-import { Maximize2, Minimize2, ZoomIn, ZoomOut, Move, Filter, Play, Pause } from "lucide-react"
+import { Maximize2, Minimize2, ZoomIn, ZoomOut, Move } from "lucide-react"
 
 interface FallbackGraphProps {
   nodes: NodeDocument[]
@@ -56,7 +56,12 @@ interface GridCell {
   nodeIndices: number[];
 }
 
-export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNodes }: FallbackGraphProps) {
+export function FallbackGraph({
+  nodes,
+  edges,
+  fullscreen = false,
+  highlightedNodes,
+}: FallbackGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(fullscreen)
@@ -79,8 +84,6 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
   const [tooltipText, setTooltipText] = useState("")
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 })
   const [showTooltip, setShowTooltip] = useState(false)
-  const [simulationPaused, setSimulationPaused] = useState(true) // Start with simulation paused
-
   // Add state for CPU-based clustering
   const [cpuClustering, setCpuClustering] = useState<boolean>(false);
   const [gridCells, setGridCells] = useState<Map<string, GridCell>>(new Map());
@@ -136,8 +139,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
     setOffset({ x: 0, y: 0 })
     setSelectedNodeId(null)
 
-    // Restart simulation
-    setSimulation((prev) => (prev ? { ...prev, isRunning: true, iteration: 0 } : null))
+    setSimulation((prev) => (prev ? { ...prev, iteration: 0 } : null))
   }, [])
 
   const handleIncreaseNodeLimit = useCallback(() => {
@@ -146,10 +148,6 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
 
   const handleDecreaseNodeLimit = useCallback(() => {
     setNodeLimit((prev) => Math.max(25, prev - 25))
-  }, [])
-
-  const toggleNodeLimit = useCallback(() => {
-    setNodeLimit((prev) => (prev === 75 ? 150 : 75))
   }, [])
 
   // Handle tooltip display
@@ -271,13 +269,13 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
     setSimulation({
       nodes: simulationNodes,
       links,
-      isRunning: !simulationPaused, // Use the simulationPaused state to determine initial running state
+      isRunning: false,
       iteration: 0,
     })
     
     // Apply CPU clustering after setting up the simulation
     applyCpuClustering(simulationNodes);
-  }, [nodes, edges, nodeLimit, simulationPaused, highlightedNodes])
+  }, [nodes, edges, nodeLimit, highlightedNodes])
 
   // Run the simulation with optimizations
   useEffect(() => {
@@ -916,12 +914,6 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
     }
   }, [isFullscreen, isBrowserFullscreen, simulation, zoom, offset, hoveredNode, selectedNodeId])
 
-  // Add toggle function for simulation pause/play
-  const toggleSimulation = useCallback(() => {
-    setSimulationPaused(!simulationPaused);
-    setSimulation(prev => prev ? { ...prev, isRunning: simulationPaused } : null);
-  }, [simulationPaused]);
-
   // Add UI control for CPU clustering toggle
   useEffect(() => {
     // Detect if GPU clustering might be unavailable (simple check)
@@ -1121,17 +1113,6 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
 
         {/* Controls */}
         <div className="absolute top-2 right-2 flex flex-col gap-2">
-          {/* Add play/pause simulation button */}
-          <button
-            onClick={toggleSimulation}
-            className="p-2 bg-black/70 hover:bg-black/90 text-white rounded-full z-10"
-            type="button"
-            onMouseEnter={(e) => handleButtonMouseEnter(e, simulationPaused ? "Start simulation" : "Pause simulation")}
-            onMouseLeave={handleButtonMouseLeave}
-          >
-            {simulationPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
-          </button>
-
           <button
             onClick={handleZoomIn}
             className="p-2 bg-black/70 hover:bg-black/90 text-white rounded-full z-10"
@@ -1152,15 +1133,6 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
             <ZoomOut className="h-4 w-4" />
           </button>
 
-          <button
-            onClick={toggleNodeLimit}
-            className="p-2 bg-black/70 hover:bg-black/90 text-white rounded-full z-10"
-            type="button"
-            onMouseEnter={(e) => handleButtonMouseEnter(e, "Toggle node limit")}
-            onMouseLeave={handleButtonMouseLeave}
-          >
-            <Filter className="h-4 w-4" />
-          </button>
         </div>
 
         {/* Selected node info */}

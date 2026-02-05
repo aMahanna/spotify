@@ -27,7 +27,7 @@ interface GraphVisualizationProps {
   edges: EdgeDocument[]
   fullscreen?: boolean
   highlightedNodes?: string[]
-  layoutType?: string
+  layoutType?: "force" | "hierarchical" | "radial"
   initialMode?: '2d' | '3d'
 }
 

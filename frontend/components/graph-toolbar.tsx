@@ -136,41 +136,45 @@ export function GraphToolbar({
             </Tooltip>
           </div>
 
-          <Separator orientation="vertical" className="h-6 hidden md:block" />
+          {use3D && (
+            <>
+              <Separator orientation="vertical" className="h-6 hidden md:block" />
 
-          {/* Layout Controls Group */}
-          <div className="flex items-center gap-1">
-            <span className="text-xs font-medium text-muted-foreground mr-2 hidden lg:inline">Layout:</span>
-            <div className="flex items-center gap-1">
-              {[
-                { key: "force", label: "Force", icon: null },
-                { key: "hierarchical", label: "Tree", icon: null },
-                { key: "radial", label: "Radial", icon: null }
-              ].map((layout) => (
-                <Tooltip key={layout.key}>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size="sm"
-                      variant={layoutType === layout.key ? "default" : "ghost"}
-                      className={`h-8 px-2 text-xs ${
-                        layoutType === layout.key 
-                          ? "bg-nvidia-green hover:bg-nvidia-green/90 text-white" 
-                          : "hover:bg-muted"
-                      }`}
-                      onClick={() => onLayoutChange(layout.key as "force" | "hierarchical" | "radial")}
-                    >
-                      {layout.label}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {layout.label} layout
-                  </TooltipContent>
-                </Tooltip>
-              ))}
-            </div>
-          </div>
+              {/* Layout Controls Group */}
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-medium text-muted-foreground mr-2 hidden lg:inline">Layout:</span>
+                <div className="flex items-center gap-1">
+                  {[
+                    { key: "force", label: "Force", icon: null },
+                    { key: "hierarchical", label: "Tree", icon: null },
+                    { key: "radial", label: "Radial", icon: null }
+                  ].map((layout) => (
+                    <Tooltip key={layout.key}>
+                      <TooltipTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant={layoutType === layout.key ? "default" : "ghost"}
+                          className={`h-8 px-2 text-xs ${
+                            layoutType === layout.key 
+                              ? "bg-nvidia-green hover:bg-nvidia-green/90 text-white" 
+                              : "hover:bg-muted"
+                          }`}
+                          onClick={() => onLayoutChange(layout.key as "force" | "hierarchical" | "radial")}
+                        >
+                          {layout.label}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {layout.label} layout
+                      </TooltipContent>
+                    </Tooltip>
+                  ))}
+                </div>
+              </div>
 
-          <Separator orientation="vertical" className="h-6 hidden md:block" />
+              <Separator orientation="vertical" className="h-6 hidden md:block" />
+            </>
+          )}
 
           {/* Data Source Controls */}
           <div className="flex items-center gap-2">
