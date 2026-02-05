@@ -35,6 +35,7 @@ PRODUCERS_COLLECTION = "producers"
 MOODS_COLLECTION = "moods"
 INSTRUMENTS_COLLECTION = "instruments"
 LANGUAGES_COLLECTION = "languages"
+CONTRIBUTORS_COLLECTION = "contributors"
 
 # Edge collections (snake_case)
 ARTISTS_SONGS = "artists_songs"
@@ -45,13 +46,13 @@ ARTISTS_GENRES = "artists_genres"
 ARTISTS_LOCATIONS = "artists_locations"
 ARTISTS_LABELS = "artists_record_labels"
 ARTISTS_ACTS = "artists_associated_acts"
-ARTISTS_RELATED = "artists_related"
 SONGS_WRITERS = "songs_songwriters"
 SONGS_PRODUCERS = "songs_producers"
 SONGS_FEATURES = "songs_features"
 SONGS_MOODS = "songs_moods"
 SONGS_INSTRUMENTS = "songs_instruments"
 SONGS_LANGUAGES = "songs_languages"
+SONGS_CONTRIBUTORS = "songs_contributors"
 
 
 def _farmhash_key(prefix: str, raw: str) -> str:
@@ -126,6 +127,7 @@ def _collection_map(graph_id: str) -> Dict[str, Dict[str, str]]:
         "moods": f"{prefix}_{MOODS_COLLECTION}",
         "instruments": f"{prefix}_{INSTRUMENTS_COLLECTION}",
         "languages": f"{prefix}_{LANGUAGES_COLLECTION}",
+        "contributors": f"{prefix}_{CONTRIBUTORS_COLLECTION}",
     }
     edges = {
         "artists_songs": f"{prefix}_{ARTISTS_SONGS}",
@@ -136,13 +138,13 @@ def _collection_map(graph_id: str) -> Dict[str, Dict[str, str]]:
         "artists_locations": f"{prefix}_{ARTISTS_LOCATIONS}",
         "artists_record_labels": f"{prefix}_{ARTISTS_LABELS}",
         "artists_associated_acts": f"{prefix}_{ARTISTS_ACTS}",
-        "artists_related": f"{prefix}_{ARTISTS_RELATED}",
         "songs_songwriters": f"{prefix}_{SONGS_WRITERS}",
         "songs_producers": f"{prefix}_{SONGS_PRODUCERS}",
         "songs_features": f"{prefix}_{SONGS_FEATURES}",
         "songs_moods": f"{prefix}_{SONGS_MOODS}",
         "songs_instruments": f"{prefix}_{SONGS_INSTRUMENTS}",
         "songs_languages": f"{prefix}_{SONGS_LANGUAGES}",
+        "songs_contributors": f"{prefix}_{SONGS_CONTRIBUTORS}",
     }
     return {"nodes": nodes, "edges": edges}
 
@@ -238,11 +240,6 @@ def _ensure_graph(db, graph_name: str, nodes: Dict[str, str], edges: Dict[str, s
             "to_vertex_collections": [nodes["artists"]],
         },
         {
-            "edge_collection": edges["artists_related"],
-            "from_vertex_collections": [nodes["artists"]],
-            "to_vertex_collections": [nodes["artists"]],
-        },
-        {
             "edge_collection": edges["songs_songwriters"],
             "from_vertex_collections": [nodes["songs"]],
             "to_vertex_collections": [nodes["songwriters"]],
@@ -271,6 +268,11 @@ def _ensure_graph(db, graph_name: str, nodes: Dict[str, str], edges: Dict[str, s
             "edge_collection": edges["songs_languages"],
             "from_vertex_collections": [nodes["songs"]],
             "to_vertex_collections": [nodes["languages"]],
+        },
+        {
+            "edge_collection": edges["songs_contributors"],
+            "from_vertex_collections": [nodes["songs"]],
+            "to_vertex_collections": [nodes["contributors"]],
         },
     ]
     db.create_graph(
@@ -461,19 +463,20 @@ def enrich_graph(
         nodes_map["moods"]: {},
         nodes_map["instruments"]: {},
         nodes_map["languages"]: {},
+        nodes_map["contributors"]: {},
     }
     enrichment_edges = [
         edges_map["artists_genres"],
         edges_map["artists_locations"],
         edges_map["artists_record_labels"],
         edges_map["artists_associated_acts"],
-        edges_map["artists_related"],
         edges_map["songs_songwriters"],
         edges_map["songs_producers"],
         edges_map["songs_features"],
         edges_map["songs_moods"],
         edges_map["songs_instruments"],
         edges_map["songs_languages"],
+        edges_map["songs_contributors"],
     ]
     edges_by_collection: Dict[str, List[Dict]] = {name: [] for name in enrichment_edges}
 
@@ -492,6 +495,7 @@ def enrich_graph(
         to_id: str,
         label: str,
         source: str | None = None,
+        extra: Dict | None = None,
     ) -> None:
         edge_key = _farmhash_key("edge", f"{from_id}|{to_id}|{label}")
         payload = {
@@ -502,6 +506,8 @@ def enrich_graph(
         }
         if source:
             payload["source"] = source
+        if extra:
+            payload.update(extra)
         edges_by_collection[collection].append(payload)
 
     artist_enrichment_cache: Dict[str, Dict] = {}
@@ -553,12 +559,18 @@ def enrich_graph(
                 "moods": [],
                 "instruments": [],
                 "languages": [],
+                "contributors": [],
+                "songdna_relations": [],
+                "stories": [],
                 "writers_source": None,
                 "producers_source": None,
                 "featured_artists_source": None,
                 "moods_source": None,
                 "instruments_source": None,
                 "languages_source": None,
+                "contributors_source": None,
+                "songdna_relations_source": None,
+                "stories_source": None,
             }
 
     if unique_artists or unique_song_keys:
@@ -733,36 +745,61 @@ def enrich_graph(
                     song_enrichment.get("languages_source"),
                 )
 
-    def add_related_edges(
-        mapping: Dict[str, set[str]],
-        relation: str,
-    ) -> None:
-        inverted: Dict[str, List[str]] = {}
-        for artist_id, values in mapping.items():
-            for value in values:
-                inverted.setdefault(value, []).append(artist_id)
+            for contributor in song_enrichment.get("contributors", []):
+                contributor_name = contributor.get("name", "")
+                contributor_role = contributor.get("role", "contributor")
+                if not contributor_name or not contributor_role:
+                    continue
+                contributor_key = _farmhash_key("contributor", contributor_name)
+                contributor_id = upsert_node(
+                    nodes_map["contributors"],
+                    contributor_key,
+                    {"name": contributor_name},
+                )
+                add_edge(
+                    edges_map["songs_contributors"],
+                    song_id,
+                    contributor_id,
+                    contributor_role,
+                    contributor.get("source") or song_enrichment.get("contributors_source"),
+                    {"detail": contributor.get("detail")} if contributor.get("detail") else None,
+                )
 
-        for value, artists in inverted.items():
-            if len(artists) < 2:
-                continue
-            for i in range(len(artists)):
-                for j in range(i + 1, len(artists)):
-                    from_id = artists[i]
-                    to_id = artists[j]
-                    edge_key = _farmhash_key("artist_related", f"{from_id}|{to_id}|{relation}|{value}")
-                    edges_by_collection[edges_map["artists_related"]].append(
-                        {
-                            "_key": edge_key,
-                            "_from": from_id,
-                            "_to": to_id,
-                            "label": relation,
-                            "value": value,
-                        }
-                    )
+            song_payload = nodes_by_collection[nodes_map["songs"]][song_key]
+            stories_payload = []
+            for story in song_enrichment.get("stories", []):
+                body = (story.get("body") or "").strip()
+                if not body:
+                    continue
+                title = (story.get("title") or f"About {track_name}").strip()
+                stories_payload.append(
+                    {
+                        "title": title,
+                        "body": body,
+                        "source": story.get("source"),
+                        "source_url": story.get("source_url"),
+                        "tags": story.get("tags") or [],
+                    }
+                )
+            if stories_payload:
+                song_payload["stories"] = stories_payload
 
-    add_related_edges(artist_to_genres, "shares_genre")
-    add_related_edges(artist_to_locations, "shares_location")
-    add_related_edges(artist_to_labels, "shares_label")
+            songdna_payload = []
+            for relation in song_enrichment.get("songdna_relations", []):
+                title = relation.get("title", "")
+                if not title:
+                    continue
+                songdna_payload.append(
+                    {
+                        "relation": relation.get("relation") or "related_to",
+                        "title": title,
+                        "artist": relation.get("artist", ""),
+                        "target_type": relation.get("target_type") or "recording",
+                        "source": relation.get("source") or song_enrichment.get("songdna_relations_source"),
+                    }
+                )
+            if songdna_payload:
+                song_payload["songdna_relations"] = songdna_payload
 
     for collection, nodes in nodes_by_collection.items():
         _batch_insert(db, collection, list(nodes.values()))

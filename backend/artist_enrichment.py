@@ -63,6 +63,31 @@ def _unique(values: List[str]) -> List[str]:
     return ordered
 
 
+def _unique_contributors(contributors: List[dict]) -> List[dict]:
+    seen = set()
+    ordered = []
+    for contributor in contributors:
+        name = (contributor.get("name") or "").strip()
+        role = (contributor.get("role") or "").strip()
+        detail = (contributor.get("detail") or "").strip()
+        if not name or not role:
+            continue
+        key = f"{name.lower()}|{role.lower()}|{detail.lower()}"
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(contributor)
+    return ordered
+
+
+def _normalize_role(role: str) -> str:
+    return " ".join((role or "").strip().split()).lower()
+
+
+def _normalize_relation(relation: str) -> str:
+    return " ".join((relation or "").strip().split()).lower()
+
+
 def _build_session() -> requests.Session:
     session = requests.Session()
     session.headers.update(DEFAULT_HEADERS)
@@ -281,6 +306,33 @@ def _genius_song(song_id: int, token: str, session: requests.Session) -> dict:
     return data.get("response", {}).get("song", {}) or {}
 
 
+def _genius_referents(song_id: int, token: str, session: requests.Session) -> List[dict]:
+    headers = {"Authorization": f"Bearer {token}"}
+    params = {"song_id": song_id, "text_format": "plain"}
+    data = _safe_get_json(
+        session,
+        f"{GENIUS_API}/referents",
+        params=params,
+        headers=headers,
+    ) or {}
+    return data.get("response", {}).get("referents", []) or []
+
+
+def _clean_annotation_text(text: str) -> str:
+    cleaned = " ".join((text or "").strip().split())
+    if not cleaned:
+        return ""
+    lowered = cleaned.lower()
+    if lowered.startswith("proposed suggestion"):
+        return ""
+    # Filter out very low-signal annotations.
+    if len(cleaned) < 80:
+        return ""
+    if len(cleaned.split()) < 12:
+        return ""
+    return cleaned
+
+
 def _audiodb_artist(name: str, api_key: str, session: requests.Session) -> dict:
     data = _safe_get_json(
         session,
@@ -496,12 +548,18 @@ def enrich_song(
             # "moods": [],
             "instruments": [],
             "languages": [],
+            "contributors": [],
+            "songdna_relations": [],
+            "stories": [],
             "writers_source": None,
             "producers_source": None,
             "featured_artists_source": None,
             # "moods_source": None,
             "instruments_source": None,
             "languages_source": None,
+            "contributors_source": None,
+            "songdna_relations_source": None,
+            "stories_source": None,
         }
 
     session = _build_session()
@@ -515,12 +573,18 @@ def enrich_song(
     # moods: List[str] = []
     instruments: List[str] = []
     languages: List[str] = []
+    contributors: List[dict] = []
+    songdna_relations: List[dict] = []
+    stories: List[dict] = []
     writer_sources: set[str] = set()
     producer_sources: set[str] = set()
     feature_sources: set[str] = set()
     # mood_sources: set[str] = set()
     instrument_sources: set[str] = set()
     language_sources: set[str] = set()
+    contributor_sources: set[str] = set()
+    songdna_sources: set[str] = set()
+    story_sources: set[str] = set()
 
     mbid: Optional[str] = None
     try:
@@ -531,17 +595,92 @@ def enrich_song(
             _record_timing("musicbrainz_recording", time.perf_counter() - started)
             relations = recording.get("relations") or []
             for rel in relations:
-                rel_type = (rel.get("type") or "").lower()
-                target = rel.get("artist", {}).get("name", "")
+                rel_type = _normalize_relation(rel.get("type") or "")
+                target_type = _normalize_relation(rel.get("target-type") or "")
+                target_artist = rel.get("artist", {}).get("name", "")
                 if rel_type in {"writer", "composer", "lyricist"}:
-                    writers.append(target)
+                    if target_artist:
+                        contributors.append(
+                            {"name": target_artist, "role": rel_type, "source": "musicbrainz"}
+                        )
+                        contributor_sources.add("musicbrainz")
+                        writers.append(target_artist)
                     writer_sources.add("musicbrainz")
                 if rel_type in {"producer", "recording producer"}:
-                    producers.append(target)
+                    if target_artist:
+                        contributors.append(
+                            {"name": target_artist, "role": "producer", "source": "musicbrainz"}
+                        )
+                        contributor_sources.add("musicbrainz")
+                        producers.append(target_artist)
                     producer_sources.add("musicbrainz")
                 if rel_type == "instrument":
-                    instruments.extend(rel.get("attributes") or [])
+                    instruments_list = rel.get("attributes") or []
+                    instruments.extend(instruments_list)
                     instrument_sources.add("musicbrainz")
+                    if target_artist:
+                        if instruments_list:
+                            for instrument in instruments_list:
+                                contributors.append(
+                                    {
+                                        "name": target_artist,
+                                        "role": "instrument",
+                                        "detail": instrument,
+                                        "source": "musicbrainz",
+                                    }
+                                )
+                        else:
+                            contributors.append(
+                                {"name": target_artist, "role": "instrument", "source": "musicbrainz"}
+                            )
+                        contributor_sources.add("musicbrainz")
+                if target_type == "artist" and target_artist:
+                    if rel_type in {
+                        "engineer",
+                        "mix",
+                        "mastering",
+                        "remixer",
+                        "arranger",
+                        "conductor",
+                        "vocal",
+                        "vocals",
+                    }:
+                        role_label = "mixer" if rel_type == "mix" else rel_type
+                        if rel_type in {"vocal", "vocals"}:
+                            role_label = "vocalist"
+                        contributors.append(
+                            {"name": target_artist, "role": role_label, "source": "musicbrainz"}
+                        )
+                        contributor_sources.add("musicbrainz")
+                if target_type in {"recording", "work"}:
+                    if rel_type in {
+                        "dj-mix",
+                        "samples",
+                        "sampled by",
+                        "cover",
+                        "covered by",
+                        "performance",
+                        "remix of",
+                        "remixed by",
+                        "based on",
+                        "medley",
+                        "quotes",
+                        "mash-up",
+                        "performance of",
+                    }:
+                        target = rel.get(target_type) or {}
+                        title = target.get("title") or target.get("name") or ""
+                        relation_artist = (target.get("artist") or {}).get("name", "")
+                        songdna_relations.append(
+                            {
+                                "relation": rel_type,
+                                "title": title,
+                                "artist": relation_artist,
+                                "target_type": target_type,
+                                "source": "musicbrainz",
+                            }
+                        )
+                        songdna_sources.add("musicbrainz")
             credits = recording.get("artist-credit") or []
             for credit in credits:
                 joinphrase = (credit.get("joinphrase") or "").lower()
@@ -550,6 +689,10 @@ def enrich_song(
                     if artist_name:
                         featured_artists.append(artist_name)
                         feature_sources.add("musicbrainz")
+                        contributors.append(
+                            {"name": artist_name, "role": "featured", "source": "musicbrainz"}
+                        )
+                        contributor_sources.add("musicbrainz")
         else:
             _record_timing("musicbrainz_recording_search", time.perf_counter() - started)
     except Exception:
@@ -602,12 +745,87 @@ def enrich_song(
                     featured_artists
                     + [artist.get("name", "") for artist in song.get("featured_artists", [])]
                 )
+                for artist in song.get("writer_artists", []) or []:
+                    name = artist.get("name", "")
+                    if name:
+                        contributors.append({"name": name, "role": "writer", "source": "genius"})
+                        contributor_sources.add("genius")
+                for artist in song.get("producer_artists", []) or []:
+                    name = artist.get("name", "")
+                    if name:
+                        contributors.append({"name": name, "role": "producer", "source": "genius"})
+                        contributor_sources.add("genius")
+                for artist in song.get("featured_artists", []) or []:
+                    name = artist.get("name", "")
+                    if name:
+                        contributors.append({"name": name, "role": "featured", "source": "genius"})
+                        contributor_sources.add("genius")
                 if song.get("writer_artists"):
                     writer_sources.add("genius")
                 if song.get("producer_artists"):
                     producer_sources.add("genius")
                 if song.get("featured_artists"):
                     feature_sources.add("genius")
+                description = (song.get("description") or {}).get("plain", "").strip()
+                if not description:
+                    full_title = (song.get("full_title") or song.get("title_with_featured") or "").strip()
+                    release_date = (song.get("release_date_for_display") or "").strip()
+                    album_name = ((song.get("album") or {}).get("name") or "").strip()
+                    primary_artist = ((song.get("primary_artist") or {}).get("name") or "").strip()
+                    annotation_count = song.get("annotation_count")
+                    summary_bits = []
+                    if full_title:
+                        summary_bits.append(full_title)
+                    elif song.get("title"):
+                        summary_bits.append(str(song.get("title")))
+                    if primary_artist and primary_artist not in (summary_bits[0] if summary_bits else ""):
+                        summary_bits.append(f"by {primary_artist}")
+                    if release_date:
+                        summary_bits.append(f"released {release_date}")
+                    if album_name:
+                        summary_bits.append(f"appears on {album_name}")
+                    if isinstance(annotation_count, int) and annotation_count > 0:
+                        summary_bits.append(f"Genius annotations: {annotation_count}")
+                    if summary_bits:
+                        description = ". ".join(summary_bits).strip() + "."
+
+                if description:
+                    tags = []
+                    for tag in song.get("tags", []) or []:
+                        if isinstance(tag, dict):
+                            tags.append(tag.get("name", ""))
+                        else:
+                            tags.append(str(tag))
+                    story = {
+                        "title": f"About {track}",
+                        "body": description.strip(),
+                        "source": "genius",
+                        "source_url": song.get("url"),
+                        "tags": tags,
+                    }
+                    stories.append(story)
+                    story_sources.add("genius")
+
+                referents = _genius_referents(song_id, genius_token, session) if song_id else []
+                for ref in referents:
+                    fragment = (ref.get("fragment") or "").strip()
+                    annotations = ref.get("annotations") or []
+                    for annotation in annotations:
+                        body = (annotation.get("body") or {}).get("plain", "")
+                        cleaned = _clean_annotation_text(body)
+                        if not cleaned:
+                            continue
+                        title = f"Annotation: {fragment}" if fragment else f"Annotation: {track}"
+                        story = {
+                            "title": title,
+                            "body": cleaned,
+                            "source": "genius",
+                            "source_url": annotation.get("url") or ref.get("url"),
+                            "tags": ["genius_annotation"],
+                        }
+                        stories.append(story)
+                        story_sources.add("genius")
+                        break
         except Exception:
             pass
 
@@ -633,6 +851,7 @@ def enrich_song(
     # moods = _unique(moods)
     instruments = _unique(instruments)
     languages = _unique(languages)
+    contributors = _unique_contributors(contributors)
 
     return {
         "writers": writers,
@@ -641,10 +860,16 @@ def enrich_song(
         # "moods": moods,
         "instruments": instruments,
         "languages": languages,
+        "contributors": contributors,
+        "songdna_relations": songdna_relations,
+        "stories": stories,
         "writers_source": _source_label(writer_sources),
         "producers_source": _source_label(producer_sources),
         "featured_artists_source": _source_label(feature_sources),
         # "moods_source": _source_label(mood_sources),
         "instruments_source": _source_label(instrument_sources),
         "languages_source": _source_label(language_sources),
+        "contributors_source": _source_label(contributor_sources),
+        "songdna_relations_source": _source_label(songdna_sources),
+        "stories_source": _source_label(story_sources),
     }
