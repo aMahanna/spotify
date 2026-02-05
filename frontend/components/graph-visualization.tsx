@@ -18,6 +18,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { FallbackGraph } from "./fallback-graph"
+import { GraphLegend } from "./graph-legend"
 import { CuboidIcon as Cube, LayoutGrid } from "lucide-react"
 import type { NodeDocument, EdgeDocument } from "@/types/graph"
 
@@ -269,6 +270,11 @@ export function GraphVisualization({
             edges={edges}
             fullscreen={fullscreen}
             highlightedNodes={highlightedNodes}
+          />
+          <GraphLegend
+            nodes={nodes}
+            edges={edges}
+            className="absolute bottom-2 right-2 z-10 max-w-[220px]"
           />
           
           <button

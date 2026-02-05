@@ -51,6 +51,8 @@ import { Separator } from "@/components/ui/separator"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Loader2, Cpu, Monitor, Settings, Brain, Layers, Zap, ChevronDown, ChevronRight } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { GraphLegend } from "@/components/graph-legend"
+import { getEdgeColor, getNodeColor } from "@/lib/collection-colors"
 
 // Dynamically import the ForceGraphWrapper component with SSR disabled
 const ForceGraphWrapper = dynamic(
@@ -198,13 +200,25 @@ export default function Graph3DPage() {
                 nodes: parsedData.nodes.length,
                 edges: parsedData.edges.length
               });
+              const nodesWithColors = Array.isArray(parsedData.nodes)
+                ? parsedData.nodes.map((node: any) => ({
+                    ...node,
+                    color: node.color || getNodeColor(node)
+                  }))
+                : []
               const links = Array.isArray(parsedData.links) ? parsedData.links : parsedData.edges
                 .map((edge: any) => {
                   if (!edge?._from || !edge?._to || !edge?.label) return null
-                  return { source: edge._from, target: edge._to, name: edge.label }
+                  return {
+                    id: edge._id,
+                    source: edge._from,
+                    target: edge._to,
+                    name: edge.label,
+                    color: getEdgeColor(edge)
+                  }
                 })
                 .filter(Boolean)
-              setGraphData({ nodes: parsedData.nodes, edges: parsedData.edges, links });
+              setGraphData({ nodes: nodesWithColors, edges: parsedData.edges, links });
             } else {
               throw new Error("Invalid data in localStorage");
             }
@@ -240,13 +254,19 @@ export default function Graph3DPage() {
               nodeCount: nodes.length,
               edgeCount: edges.length
             });
+            const nodesWithColors = Array.isArray(nodes)
+              ? nodes.map((node: any) => ({
+                  ...node,
+                  color: node.color || getNodeColor(node)
+                }))
+              : []
             const links = edges
               .map((edge: any) => {
                 if (!edge?._from || !edge?._to || !edge?.label) return null
                 return { source: edge._from, target: edge._to, name: edge.label }
               })
               .filter(Boolean)
-            setGraphData({ nodes, edges, links })
+            setGraphData({ nodes: nodesWithColors, edges, links })
             setDebugInfo("Using nodes/edges data from URL parameters")
             setIsLoading(false)
             return
@@ -343,24 +363,34 @@ export default function Graph3DPage() {
           data.links = data.edges
             .map((edge: any) => {
               if (!edge?._from || !edge?._to || !edge?.label) return null
-              return { source: edge._from, target: edge._to, name: edge.label }
+              return {
+                id: edge._id,
+                source: edge._from,
+                target: edge._to,
+                name: edge.label,
+                color: getEdgeColor(edge)
+              }
             })
             .filter(Boolean)
         }
 
-        // Handle stored triples response format
+        if (useStoredTriples && Array.isArray(data.nodes) && Array.isArray(data.edges)) {
+          console.log("Processing stored node/edge documents from graph database");
+          const nodesWithColors = data.nodes.map((node: any) => ({
+            ...node,
+            color: node.color || getNodeColor(node)
+          }))
+          setGraphData({ nodes: nodesWithColors, edges: data.edges, links: data.links || [] });
+          setDebugInfo(`Using ${data.nodes.length} nodes and ${data.edges.length} edges from ${data.databaseType || 'graph database'}`);
+          setIsLoading(false);
+          return;
+        }
+        
+        // Handle stored triples response format (fallback)
         if (useStoredTriples && data.triples && Array.isArray(data.triples)) {
           console.log("Processing stored triples from graph database");
           setGraphData({ triples: data.triples });
           setDebugInfo("");
-          setIsLoading(false);
-          return;
-        }
-
-        if (useStoredTriples && Array.isArray(data.nodes) && Array.isArray(data.edges)) {
-          console.log("Processing stored node/edge documents from graph database");
-          setGraphData({ nodes: data.nodes, edges: data.edges, links: data.links || [] });
-          setDebugInfo(`Using ${data.nodes.length} nodes and ${data.edges.length} edges from ${data.databaseType || 'graph database'}`);
           setIsLoading(false);
           return;
         }
@@ -484,6 +514,7 @@ export default function Graph3DPage() {
             {debugInfo && (
               <div className="bg-gray-800/80 px-2 py-1 rounded text-xs text-gray-300">{debugInfo}</div>
             )}
+
 
             {/* Enhanced Clustering Controls Panel */}
             {showClusteringControls && (
@@ -778,6 +809,11 @@ export default function Graph3DPage() {
               </div>
             </div>
           )}
+          <GraphLegend
+            nodes={Array.isArray(graphData?.nodes) ? graphData.nodes : []}
+            edges={Array.isArray(graphData?.edges) ? graphData.edges : []}
+            className="absolute bottom-2 right-2 z-50 max-w-[220px]"
+          />
         </>
       )}
     </div>

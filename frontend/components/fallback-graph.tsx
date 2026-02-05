@@ -20,6 +20,7 @@ import type React from "react"
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import type { NodeDocument, EdgeDocument } from "@/types/graph"
+import { getEdgeColor, getNodeColor } from "@/lib/collection-colors"
 import { Maximize2, Minimize2, ZoomIn, ZoomOut, Move, Filter, Play, Pause } from "lucide-react"
 
 interface FallbackGraphProps {
@@ -45,6 +46,7 @@ interface Link {
   source: string
   target: string
   label: string
+  color?: string
 }
 
 // Add interface for CPU-based grid cell
@@ -251,7 +253,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
         vx: 0,
         vy: 0,
         radius: Math.max(5, Math.min(12, 5 + connectionCount * 0.5)),
-        color: isHighlighted ? "#FF9900" : "#76B900",
+        color: isHighlighted ? "#FF9900" : getNodeColor(nodeDoc || { _id: id }),
         connections: connectionCount,
       }
     })
@@ -263,6 +265,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
         source: edge._from,
         target: edge._to,
         label: edge.label,
+        color: getEdgeColor(edge),
       }))
 
     setSimulation({
@@ -463,7 +466,9 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
         ctx.beginPath()
         ctx.moveTo(x1, y1)
         ctx.lineTo(x2, y2)
-        ctx.strokeStyle = isHighlightedLink ? 'rgba(255, 153, 0, 0.8)' : "rgba(150, 150, 150, 0.3)"
+        ctx.strokeStyle = isHighlightedLink
+          ? "rgba(255, 153, 0, 0.8)"
+          : (link.color || "rgba(150, 150, 150, 0.6)")
         ctx.stroke()
         
         // Draw directional arrow
@@ -494,7 +499,9 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
         )
         ctx.closePath()
         
-        ctx.fillStyle = isHighlightedLink ? 'rgba(255, 153, 0, 0.8)' : "rgba(150, 150, 150, 0.5)"
+        ctx.fillStyle = isHighlightedLink
+          ? "rgba(255, 153, 0, 0.8)"
+          : (link.color || "rgba(150, 150, 150, 0.5)")
         ctx.fill()
         
         // Draw link label if hovered/selected or zoom is high enough
@@ -783,17 +790,19 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
             const tx = centerX + (targetNode.x + offset.x) * zoom
             const ty = centerY + (targetNode.y + offset.y) * zoom
 
-            // Highlight links connected to selected node
-            if (
+            const isHighlighted =
               hoveredNode === sourceNode.id ||
               hoveredNode === targetNode.id ||
               selectedNodeId === sourceNode.id ||
               selectedNodeId === targetNode.id
-            ) {
+            const defaultLinkColor = link.color || "rgba(255, 255, 255, 0.5)"
+
+            // Highlight links connected to selected node
+            if (isHighlighted) {
               ctx.strokeStyle = "rgba(118, 185, 0, 0.6)"
               ctx.lineWidth = 2
             } else {
-              ctx.strokeStyle = "rgba(255, 255, 255, 0.2)"
+              ctx.strokeStyle = defaultLinkColor
               ctx.lineWidth = 1
             }
 
@@ -817,7 +826,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
               ty - arrowLength * Math.sin(angle + Math.PI / 6),
             )
             ctx.closePath()
-            ctx.fillStyle = "rgba(118, 185, 0, 0.6)"
+            ctx.fillStyle = isHighlighted ? "rgba(118, 185, 0, 0.6)" : (link.color || "rgba(118, 185, 0, 0.6)")
             ctx.fill()
 
             // Draw link label for selected connections
@@ -861,7 +870,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
             // Glow effect
             ctx.fillStyle = "#76B900"
           } else {
-            ctx.fillStyle = "rgba(118, 185, 0, 0.8)"
+            ctx.fillStyle = node.color || "rgba(118, 185, 0, 0.8)"
           }
 
           ctx.fill()
@@ -960,17 +969,19 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
               const tx = centerX + (targetNode.x + offset.x) * zoom;
               const ty = centerY + (targetNode.y + offset.y) * zoom;
               
-              // Highlight links connected to selected node
-              if (
+              const isHighlighted =
                 hoveredNode === sourceNode.id ||
                 hoveredNode === targetNode.id ||
                 selectedNodeId === sourceNode.id ||
                 selectedNodeId === targetNode.id
-              ) {
+              const defaultLinkColor = link.color || "rgba(255, 255, 255, 0.5)"
+
+              // Highlight links connected to selected node
+              if (isHighlighted) {
                 ctx.strokeStyle = "rgba(118, 185, 0, 0.7)";
                 ctx.lineWidth = 2.5;
               } else {
-                ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+                ctx.strokeStyle = defaultLinkColor;
                 ctx.lineWidth = 1;
               }
               
@@ -994,7 +1005,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
                 ty - arrowLength * Math.sin(angle + Math.PI / 6)
               );
               ctx.closePath();
-              ctx.fillStyle = "rgba(118, 185, 0, 0.7)";
+              ctx.fillStyle = isHighlighted ? "rgba(118, 185, 0, 0.7)" : (link.color || "rgba(118, 185, 0, 0.7)");
               ctx.fill();
             }
           }
@@ -1025,7 +1036,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
             } else if (node.id === hoveredNode) {
               ctx.fillStyle = "#d0ff50"; // Yellow-green for hovered
             } else {
-              ctx.fillStyle = "rgba(118, 185, 0, 0.8)"; // Default
+              ctx.fillStyle = node.color || "rgba(118, 185, 0, 0.8)"; // Default
             }
             
             ctx.fill();
@@ -1151,33 +1162,6 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
             <Filter className="h-4 w-4" />
           </button>
         </div>
-
-        {/* Node limit controls */}
-        {showNodeLimitWarning && (
-          <div className="absolute bottom-2 right-2 bg-black/70 rounded px-2 py-1 flex items-center gap-2">
-            <button
-              onClick={handleDecreaseNodeLimit}
-              className="text-white text-xs px-2 py-0.5 bg-gray-700 rounded hover:bg-gray-600"
-              disabled={nodeLimit <= 25}
-              type="button"
-              onMouseEnter={(e) => handleButtonMouseEnter(e, "Show fewer nodes")}
-              onMouseLeave={handleButtonMouseLeave}
-            >
-              -
-            </button>
-            <span className="text-xs text-white">{nodeLimit} nodes</span>
-            <button
-              onClick={handleIncreaseNodeLimit}
-              className="text-white text-xs px-2 py-0.5 bg-gray-700 rounded hover:bg-gray-600"
-              disabled={nodeLimit >= 500}
-              type="button"
-              onMouseEnter={(e) => handleButtonMouseEnter(e, "Show more nodes")}
-              onMouseLeave={handleButtonMouseLeave}
-            >
-              +
-            </button>
-          </div>
-        )}
 
         {/* Selected node info */}
         {selectedNodeId && (

@@ -28,6 +28,7 @@ import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { FallbackGraph } from "@/components/fallback-graph"
 import { GraphVisualization } from "@/components/graph-visualization"
+import { GraphLegend } from "@/components/graph-legend"
 import { GraphToolbar } from "@/components/graph-toolbar"
 import { Triple, NodeDocument, EdgeDocument } from "@/types/graph"
 import {
@@ -73,6 +74,10 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
   const [error, setError] = useState<string | null>(null)
   const [use3D, setUse3D] = useState(false)
   const [storedTriples, setStoredTriples] = useState<Triple[]>([])
+  const [storedGraphDocuments, setStoredGraphDocuments] = useState<{
+    nodes: NodeDocument[]
+    edges: EdgeDocument[]
+  } | null>(null)
   const [includeStoredTriples, setIncludeStoredTriples] = useState(true)
   const [loadingStoredTriples, setLoadingStoredTriples] = useState(false)
   const [enrichJobId, setEnrichJobId] = useState<string | null>(null)
@@ -161,6 +166,7 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
     const fetchStoredTriples = async () => {
       if (!includeStoredTriples) {
         setStoredTriples([])
+        setStoredGraphDocuments(null)
         return
       }
 
@@ -172,10 +178,16 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
         if (response.ok) {
           const data = await response.json()
           setStoredTriples(data.triples || [])
+          if (Array.isArray(data.nodes) && Array.isArray(data.edges)) {
+            setStoredGraphDocuments({ nodes: data.nodes, edges: data.edges })
+          } else {
+            setStoredGraphDocuments(null)
+          }
           console.log(`Loaded ${data.triples?.length || 0} stored triples from ArangoDB`)
         } else {
           console.warn('Failed to fetch stored triples:', response.statusText)
           setStoredTriples([])
+          setStoredGraphDocuments(null)
         }
       } catch (error) {
         console.error('Error fetching stored triples:', error)
@@ -187,6 +199,13 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
 
     fetchStoredTriples()
   }, [includeStoredTriples, graphId, refreshKey, refreshToken])
+
+  const graphDocuments = useMemo(() => {
+    if (includeStoredTriples && storedGraphDocuments?.nodes?.length && storedGraphDocuments?.edges?.length) {
+      return storedGraphDocuments
+    }
+    return documentGraph
+  }, [includeStoredTriples, storedGraphDocuments, documentGraph])
 
   useEffect(() => {
     if (!enrichJobId) return
@@ -566,8 +585,8 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
               </div>
             ) : use3D ? (
               <GraphVisualization 
-                nodes={documentGraph.nodes}
-                edges={documentGraph.edges}
+                nodes={graphDocuments.nodes}
+                edges={graphDocuments.edges}
                 fullscreen={isFullscreen}
                 highlightedNodes={highlightedNodes}
                 layoutType={layoutType}
@@ -575,9 +594,16 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
               />
             ) : (
               <FallbackGraph 
-                nodes={documentGraph.nodes} 
-                edges={documentGraph.edges}
+                nodes={graphDocuments.nodes} 
+                edges={graphDocuments.edges}
                 fullscreen={isFullscreen}
+              />
+            )}
+            {!loading && (
+              <GraphLegend
+                nodes={graphDocuments.nodes}
+                edges={graphDocuments.edges}
+                className="absolute bottom-2 right-2 z-10 max-w-[220px]"
               />
             )}
           </div>

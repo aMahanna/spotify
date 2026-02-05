@@ -293,7 +293,6 @@ export default function Home() {
             value={effectiveGraphId || ""}
             onChange={handleSelectChange}
           >
-            <option value="">Most recent</option>
             {sortedPlaylists.map((item) => (
               <option key={item.graph_id} value={item.graph_id}>
                 {item.playlist_name || item.playlist_url || item.graph_id}
