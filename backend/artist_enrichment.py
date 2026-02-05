@@ -1,19 +1,48 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, List, Optional
+import threading
+import time
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 WIKIDATA_ENTITY = "https://www.wikidata.org/wiki/Special:EntityData/{}.json"
 DISCOGS_API = "https://api.discogs.com"
+LASTFM_API = "https://ws.audioscrobbler.com/2.0/"
+MUSICBRAINZ_API = "https://musicbrainz.org/ws/2"
+GENIUS_API = "https://api.genius.com"
+AUDIODB_API = "https://www.theaudiodb.com/api/v1/json"
+ACOUSTICBRAINZ_API = "https://acousticbrainz.org"
 
 DISCOGS_TOKEN_ENV = "DISCOGS_TOKEN"
+LASTFM_API_KEY_ENV = "LASTFM_API_KEY"
+LASTFM_SHARED_SECRET_ENV = "LASTFM_SHARED_SECRET"
+GENIUS_ACCESS_TOKEN_ENV = "GENIUS_ACCESS_TOKEN"
+AUDIODB_API_KEY_ENV = "THEAUDIODB_API_KEY"
 DEFAULT_TIMEOUT = 10
 DEFAULT_HEADERS = {
     "User-Agent": "txt2kg/1.0 (https://github.com)",
 }
+
+_timing_lock = threading.Lock()
+_timings: Dict[str, float] = {}
+
+
+def _record_timing(name: str, elapsed: float) -> None:
+    with _timing_lock:
+        _timings[name] = _timings.get(name, 0.0) + elapsed
+
+
+def reset_timing_report() -> None:
+    with _timing_lock:
+        _timings.clear()
+
+
+def get_timing_report() -> Dict[str, float]:
+    with _timing_lock:
+        return dict(_timings)
 
 
 def _normalize_name(name: str) -> str:
@@ -38,6 +67,25 @@ def _build_session() -> requests.Session:
     session = requests.Session()
     session.headers.update(DEFAULT_HEADERS)
     return session
+
+
+def _safe_get_json(
+    session: requests.Session,
+    url: str,
+    *,
+    params: Optional[dict] = None,
+    headers: Optional[dict] = None,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> Optional[dict]:
+    response = session.get(url, params=params, headers=headers, timeout=timeout)
+    response.raise_for_status()
+    return response.json()
+
+
+def _source_label(sources: set[str]) -> Optional[str]:
+    if not sources:
+        return None
+    return "|".join(sorted(sources))
 
 
 def _wikidata_search(name: str, session: requests.Session, limit: int = 5) -> List[str]:
@@ -151,6 +199,112 @@ def _enrich_wikidata(name: str, session: requests.Session) -> dict:
     }
 
 
+def _lastfm_call(method: str, api_key: str, session: requests.Session, **params) -> dict:
+    payload = {
+        "method": method,
+        "api_key": api_key,
+        "format": "json",
+    }
+    payload.update(params)
+    return _safe_get_json(session, LASTFM_API, params=payload) or {}
+
+
+def _lastfm_artist_tags(name: str, api_key: str, session: requests.Session) -> List[str]:
+    data = _lastfm_call("artist.getTopTags", api_key, session, artist=name, limit=10)
+    tags = data.get("toptags", {}).get("tag", [])
+    return _unique([tag.get("name", "") for tag in tags])
+
+
+def _lastfm_track_tags(
+    track: str,
+    artist: str,
+    api_key: str,
+    session: requests.Session,
+) -> List[str]:
+    data = _lastfm_call(
+        "track.getTopTags",
+        api_key,
+        session,
+        track=track,
+        artist=artist,
+        limit=10,
+    )
+    tags = data.get("toptags", {}).get("tag", [])
+    return _unique([tag.get("name", "") for tag in tags])
+
+
+def _musicbrainz_search_artist(name: str, session: requests.Session) -> Optional[str]:
+    params = {"query": f'artist:"{name}"', "fmt": "json", "limit": 1}
+    data = _safe_get_json(session, f"{MUSICBRAINZ_API}/artist", params=params) or {}
+    artists = data.get("artists") or []
+    if not artists:
+        return None
+    return artists[0].get("id")
+
+
+def _musicbrainz_artist(mbid: str, session: requests.Session) -> dict:
+    params = {"fmt": "json", "inc": "aliases+tags+genres+artist-rels"}
+    return _safe_get_json(session, f"{MUSICBRAINZ_API}/artist/{mbid}", params=params) or {}
+
+
+def _musicbrainz_search_recording(
+    track: str,
+    artist: str,
+    session: requests.Session,
+) -> Optional[str]:
+    query = f'recording:"{track}" AND artist:"{artist}"'
+    params = {"query": query, "fmt": "json", "limit": 1}
+    data = _safe_get_json(session, f"{MUSICBRAINZ_API}/recording", params=params) or {}
+    recordings = data.get("recordings") or []
+    if not recordings:
+        return None
+    return recordings[0].get("id")
+
+
+def _musicbrainz_recording(mbid: str, session: requests.Session) -> dict:
+    params = {"fmt": "json", "inc": "artist-credits+artist-rels+work-rels+recording-rels"}
+    return _safe_get_json(session, f"{MUSICBRAINZ_API}/recording/{mbid}", params=params) or {}
+
+
+def _genius_search_song(query: str, token: str, session: requests.Session) -> Optional[int]:
+    headers = {"Authorization": f"Bearer {token}"}
+    data = _safe_get_json(session, f"{GENIUS_API}/search", params={"q": query}, headers=headers) or {}
+    hits = data.get("response", {}).get("hits", [])
+    if not hits:
+        return None
+    return hits[0].get("result", {}).get("id")
+
+
+def _genius_song(song_id: int, token: str, session: requests.Session) -> dict:
+    headers = {"Authorization": f"Bearer {token}"}
+    data = _safe_get_json(session, f"{GENIUS_API}/songs/{song_id}", headers=headers) or {}
+    return data.get("response", {}).get("song", {}) or {}
+
+
+def _audiodb_artist(name: str, api_key: str, session: requests.Session) -> dict:
+    data = _safe_get_json(
+        session,
+        f"{AUDIODB_API}/{api_key}/search.php",
+        params={"s": name},
+    ) or {}
+    artists = data.get("artists") or []
+    return artists[0] if artists else {}
+
+
+def _audiodb_track(artist: str, track: str, api_key: str, session: requests.Session) -> dict:
+    data = _safe_get_json(
+        session,
+        f"{AUDIODB_API}/{api_key}/searchtrack.php",
+        params={"s": artist, "t": track},
+    ) or {}
+    tracks = data.get("track") or []
+    return tracks[0] if tracks else {}
+
+
+def _acousticbrainz_highlevel(mbid: str, session: requests.Session) -> dict:
+    return _safe_get_json(session, f"{ACOUSTICBRAINZ_API}/{mbid}/high-level") or {}
+
+
 def _discogs_headers() -> dict:
     return DEFAULT_HEADERS
 
@@ -217,28 +371,280 @@ def enrich_artist(name: str, discogs_token: Optional[str] = None) -> dict:
 
     session = _build_session()
     discogs_token = discogs_token or os.getenv(DISCOGS_TOKEN_ENV)
+    lastfm_key = os.getenv(LASTFM_API_KEY_ENV)
+    audiodb_key = os.getenv(AUDIODB_API_KEY_ENV)
 
-    wikidata = {"genres": [], "labels": [], "locations": []}
-    discogs = {"associated_acts": []}
+    genres: List[str] = []
+    labels: List[str] = []
+    locations: List[str] = []
+    associated_acts: List[str] = []
+    genre_sources: set[str] = set()
+    label_sources: set[str] = set()
+    location_sources: set[str] = set()
+    acts_sources: set[str] = set()
 
     try:
+        started = time.perf_counter()
         wikidata = _enrich_wikidata(normalized, session)
+        _record_timing("wikidata", time.perf_counter() - started)
+        genres = _unique(genres + wikidata.get("genres", []))
+        labels = _unique(labels + wikidata.get("labels", []))
+        locations = _unique(locations + wikidata.get("locations", []))
+        if wikidata.get("genres"):
+            genre_sources.add("wikidata")
+        if wikidata.get("labels"):
+            label_sources.add("wikidata")
+        if wikidata.get("locations"):
+            location_sources.add("wikidata")
     except Exception:
         pass
 
     if discogs_token:
         try:
+            started = time.perf_counter()
             discogs = _enrich_discogs(normalized, discogs_token, session)
+            _record_timing("discogs", time.perf_counter() - started)
+            associated_acts = _unique(associated_acts + discogs.get("associated_acts", []))
+            if discogs.get("associated_acts"):
+                acts_sources.add("discogs")
         except Exception:
             pass
 
+    if lastfm_key:
+        try:
+            started = time.perf_counter()
+            tags = _lastfm_artist_tags(normalized, lastfm_key, session)
+            _record_timing("lastfm_artist_tags", time.perf_counter() - started)
+            genres = _unique(genres + tags)
+            if tags:
+                genre_sources.add("lastfm")
+        except Exception:
+            pass
+
+    if audiodb_key:
+        try:
+            started = time.perf_counter()
+            audiodb_artist = _audiodb_artist(normalized, audiodb_key, session)
+            _record_timing("theaudiodb_artist", time.perf_counter() - started)
+            genre = audiodb_artist.get("strGenre", "")
+            style = audiodb_artist.get("strStyle", "")
+            country = audiodb_artist.get("strCountry", "")
+            genres = _unique(genres + [genre, style])
+            locations = _unique(locations + [country])
+            if genre or style:
+                genre_sources.add("theaudiodb")
+            if country:
+                location_sources.add("theaudiodb")
+        except Exception:
+            pass
+
+    try:
+        started = time.perf_counter()
+        mbid = _musicbrainz_search_artist(normalized, session)
+        if mbid:
+            mb_artist = _musicbrainz_artist(mbid, session)
+            _record_timing("musicbrainz_artist", time.perf_counter() - started)
+            mb_genres = [item.get("name", "") for item in (mb_artist.get("genres") or [])]
+            if not mb_genres:
+                mb_genres = [item.get("name", "") for item in (mb_artist.get("tags") or [])]
+            mb_location = (mb_artist.get("area") or {}).get("name", "")
+            relations = mb_artist.get("relations") or []
+            mb_acts = [
+                rel.get("artist", {}).get("name", "")
+                for rel in relations
+                if rel.get("target-type") == "artist"
+            ]
+            genres = _unique(genres + mb_genres)
+            locations = _unique(locations + [mb_location])
+            associated_acts = _unique(associated_acts + mb_acts)
+            if mb_genres:
+                genre_sources.add("musicbrainz")
+            if mb_location:
+                location_sources.add("musicbrainz")
+            if mb_acts:
+                acts_sources.add("musicbrainz")
+        else:
+            _record_timing("musicbrainz_artist_search", time.perf_counter() - started)
+    except Exception:
+        pass
+
     return {
-        "genres": wikidata.get("genres", []),
-        "labels": wikidata.get("labels", []),
-        "locations": wikidata.get("locations", []),
-        "associated_acts": discogs.get("associated_acts", []),
-        "genres_source": "wikidata" if wikidata.get("genres") else None,
-        "labels_source": "wikidata" if wikidata.get("labels") else None,
-        "locations_source": "wikidata" if wikidata.get("locations") else None,
-        "associated_acts_source": "discogs" if discogs.get("associated_acts") else None,
+        "genres": genres,
+        "labels": labels,
+        "locations": locations,
+        "associated_acts": associated_acts,
+        "genres_source": _source_label(genre_sources),
+        "labels_source": _source_label(label_sources),
+        "locations_source": _source_label(location_sources),
+        "associated_acts_source": _source_label(acts_sources),
+    }
+
+
+def enrich_song(
+    track: str,
+    artist: str,
+    *,
+    album: Optional[str] = None,
+) -> dict:
+    normalized_track = _normalize_name(track)
+    normalized_artist = _normalize_name(artist)
+    if not normalized_track or not normalized_artist:
+        return {
+            "writers": [],
+            "producers": [],
+            "featured_artists": [],
+            # "moods": [],
+            "instruments": [],
+            "languages": [],
+            "writers_source": None,
+            "producers_source": None,
+            "featured_artists_source": None,
+            # "moods_source": None,
+            "instruments_source": None,
+            "languages_source": None,
+        }
+
+    session = _build_session()
+    genius_token = os.getenv(GENIUS_ACCESS_TOKEN_ENV)
+    lastfm_key = os.getenv(LASTFM_API_KEY_ENV)
+    audiodb_key = os.getenv(AUDIODB_API_KEY_ENV)
+
+    writers: List[str] = []
+    producers: List[str] = []
+    featured_artists: List[str] = []
+    # moods: List[str] = []
+    instruments: List[str] = []
+    languages: List[str] = []
+    writer_sources: set[str] = set()
+    producer_sources: set[str] = set()
+    feature_sources: set[str] = set()
+    # mood_sources: set[str] = set()
+    instrument_sources: set[str] = set()
+    language_sources: set[str] = set()
+
+    mbid: Optional[str] = None
+    try:
+        started = time.perf_counter()
+        mbid = _musicbrainz_search_recording(normalized_track, normalized_artist, session)
+        if mbid:
+            recording = _musicbrainz_recording(mbid, session)
+            _record_timing("musicbrainz_recording", time.perf_counter() - started)
+            relations = recording.get("relations") or []
+            for rel in relations:
+                rel_type = (rel.get("type") or "").lower()
+                target = rel.get("artist", {}).get("name", "")
+                if rel_type in {"writer", "composer", "lyricist"}:
+                    writers.append(target)
+                    writer_sources.add("musicbrainz")
+                if rel_type in {"producer", "recording producer"}:
+                    producers.append(target)
+                    producer_sources.add("musicbrainz")
+                if rel_type == "instrument":
+                    instruments.extend(rel.get("attributes") or [])
+                    instrument_sources.add("musicbrainz")
+            credits = recording.get("artist-credit") or []
+            for credit in credits:
+                joinphrase = (credit.get("joinphrase") or "").lower()
+                if "feat" in joinphrase:
+                    artist_name = (credit.get("artist") or {}).get("name", "")
+                    if artist_name:
+                        featured_artists.append(artist_name)
+                        feature_sources.add("musicbrainz")
+        else:
+            _record_timing("musicbrainz_recording_search", time.perf_counter() - started)
+    except Exception:
+        pass
+
+    # Moods are temporarily disabled.
+    # if mbid:
+    #     try:
+    #         started = time.perf_counter()
+    #         acoustic = _acousticbrainz_highlevel(mbid, session)
+    #         _record_timing("acousticbrainz_highlevel", time.perf_counter() - started)
+    #         highlevel = acoustic.get("highlevel") or {}
+    #         for key, value in highlevel.items():
+    #             if not key.startswith("mood_"):
+    #                 continue
+    #             mood_value = value.get("value")
+    #             if mood_value:
+    #                 moods.append(mood_value)
+    #         if moods:
+    #             mood_sources.add("acousticbrainz")
+    #     except Exception:
+    #         pass
+    #
+    # if lastfm_key:
+    #     try:
+    #         started = time.perf_counter()
+    #         tags = _lastfm_track_tags(normalized_track, normalized_artist, lastfm_key, session)
+    #         _record_timing("lastfm_track_tags", time.perf_counter() - started)
+    #         moods = _unique(moods + tags)
+    #         if tags:
+    #             mood_sources.add("lastfm")
+    #     except Exception:
+    #         pass
+
+    if genius_token:
+        try:
+            started = time.perf_counter()
+            query = f"{normalized_track} {normalized_artist}"
+            song_id = _genius_search_song(query, genius_token, session)
+            song = _genius_song(song_id, genius_token, session) if song_id else {}
+            _record_timing("genius", time.perf_counter() - started)
+            if song:
+                writers = _unique(
+                    writers + [artist.get("name", "") for artist in song.get("writer_artists", [])]
+                )
+                producers = _unique(
+                    producers + [artist.get("name", "") for artist in song.get("producer_artists", [])]
+                )
+                featured_artists = _unique(
+                    featured_artists
+                    + [artist.get("name", "") for artist in song.get("featured_artists", [])]
+                )
+                if song.get("writer_artists"):
+                    writer_sources.add("genius")
+                if song.get("producer_artists"):
+                    producer_sources.add("genius")
+                if song.get("featured_artists"):
+                    feature_sources.add("genius")
+        except Exception:
+            pass
+
+    if audiodb_key:
+        try:
+            started = time.perf_counter()
+            audiodb_track = _audiodb_track(normalized_artist, normalized_track, audiodb_key, session)
+            _record_timing("theaudiodb_track", time.perf_counter() - started)
+            # mood = audiodb_track.get("strMood", "")
+            language = audiodb_track.get("strLanguage", "")
+            # if mood:
+            #     moods = _unique(moods + [mood])
+            #     mood_sources.add("theaudiodb")
+            if language:
+                languages = _unique(languages + [language])
+                language_sources.add("theaudiodb")
+        except Exception:
+            pass
+
+    writers = _unique(writers)
+    producers = _unique(producers)
+    featured_artists = _unique(featured_artists)
+    # moods = _unique(moods)
+    instruments = _unique(instruments)
+    languages = _unique(languages)
+
+    return {
+        "writers": writers,
+        "producers": producers,
+        "featured_artists": featured_artists,
+        # "moods": moods,
+        "instruments": instruments,
+        "languages": languages,
+        "writers_source": _source_label(writer_sources),
+        "producers_source": _source_label(producer_sources),
+        "featured_artists_source": _source_label(feature_sources),
+        # "moods_source": _source_label(mood_sources),
+        "instruments_source": _source_label(instrument_sources),
+        "languages_source": _source_label(language_sources),
     }

@@ -390,6 +390,7 @@ export function ForceGraphWrapper({
   // Track notifications
   const [notification, setNotification] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null)
   const notificationTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const focusInProgressRef = useRef(false)
   
   // Track highlighted nodes for visual emphasis
   const [internalHighlightedNodes, setInternalHighlightedNodes] = useState<Set<string>>(new Set())
@@ -1362,37 +1363,39 @@ export function ForceGraphWrapper({
     zoomToFit();
   };
 
-  // Focus on a specific node with safety mechanism
+  // Focus camera on a specific node with safety mechanism
+  const focusCameraOnNode = (node: any) => {
+    if (!node || !graphRef.current) return;
+    if (focusInProgressRef.current) return;
+    focusInProgressRef.current = true;
+    setTimeout(() => {
+      if (graphRef.current) {
+        try {
+          graphRef.current.centerAt(node.x, node.y, node.z, 800);
+          setTimeout(() => {
+            if (graphRef.current) {
+              graphRef.current.zoom(1.5, 800);
+            }
+          }, 100);
+        } catch (err) {
+          console.warn("Error focusing on node:", err);
+        }
+      }
+      focusInProgressRef.current = false;
+    }, 50);
+  };
+
+  // Focus on a specific node by id (selection + camera)
   const focusOnNode = (nodeId: string) => {
     if (!graphData || !graphRef.current) return;
-    
     const node = graphData.nodes.find((n: any) => n.id === nodeId);
-    if (node) {
-      handleNodeSelection(node);
-      
-      // Use setTimeout to prevent possible recursion
-      setTimeout(() => {
-        if (graphRef.current) {
-          try {
-            // Use centerAt and zoom separately with a delay in between
-            graphRef.current.centerAt(node.x, node.y, node.z, 800);
-            
-            // Add delay before zooming
-            setTimeout(() => {
-              if (graphRef.current) {
-                graphRef.current.zoom(1.5, 800);
-              }
-            }, 100);
-          } catch (err) {
-            console.warn("Error focusing on node:", err);
-          }
-        }
-      }, 50);
-    }
+    if (!node) return;
+    handleNodeSelection(node, { skipFocus: true });
+    focusCameraOnNode(node);
   };
 
   // Replace or enhance the handleNodeSelection function
-  const handleNodeSelection = (node: any) => {
+  const handleNodeSelection = (node: any, options?: { skipFocus?: boolean }) => {
     // Function to reliably extract a node's ID
     const getNodeId = (nodeObj: any): string => {
       if (!nodeObj) return '';
@@ -1559,8 +1562,10 @@ export function ForceGraphWrapper({
           })
           .refresh();
         
-        // Zoom to focus on the selected node
-        focusOnNode(nodeId);
+        // Zoom to focus on the selected node (unless skipped)
+        if (!options?.skipFocus) {
+          focusCameraOnNode(node);
+        }
       }
       
     }
@@ -1576,17 +1581,15 @@ export function ForceGraphWrapper({
         conn.target === node.id || conn.source === node.id
       );
       
-      if (isSelected) return '#50fa7b'; // Bright green for selected
-      if (isHovered) return '#8be9fd'; // Cyan for hovered
-      if (isConnected) return '#bd93f9'; // Purple for connected nodes
-      
       // Default colors based on group
       const group = node.group || 'default';
-      switch (group) {
-        case 'document': return '#f8f8f2'; // White for documents
-        case 'important': return '#8be9fd'; // Teal for important nodes
-        default: return '#50fa7b'; // Bright green for most nodes
-      }
+      const baseColor = node.color
+        || (group === 'document' ? '#f8f8f2' : group === 'important' ? '#8be9fd' : '#50fa7b');
+
+      if (isSelected) return baseColor;
+      if (isHovered) return '#8be9fd'; // Cyan for hovered
+      if (isConnected) return '#bd93f9'; // Purple for connected nodes
+      return baseColor;
     } catch (error) {
       console.warn('Error in getNodeColor:', error);
       return '#50fa7b'; // Default fallback
@@ -2169,19 +2172,11 @@ export function ForceGraphWrapper({
           
           const isSelected = selectedNodeId && nodeId === selectedNodeId;
           const isConnected = selectedNodeId && connectedNodeIds.has(nodeId);
-          
-          if (isSelected) return '#50fa7b'; // Bright green for selected
-          if (isConnected) return '#bd93f9'; // Purple for connected nodes
-          
-          if (node.color) return node.color;
+          const baseColor = node.color || getNodeColor(node);
 
-          // Default colors based on group
-          const group = node.group || 'default';
-          switch (group) {
-            case 'document': return '#f8f8f2'; // White for documents
-            case 'important': return '#8be9fd'; // Teal for important nodes
-            default: return getNodeColor(node); // Collection-based color
-          }
+          if (isSelected) return baseColor; // Keep original node color
+          if (isConnected) return '#bd93f9'; // Purple for connected nodes
+          return baseColor;
         })
         .linkColor((link: any) => {
           // Highlight links connected to selected node
@@ -2646,12 +2641,12 @@ export function ForceGraphWrapper({
   const createSelectionRing = (node: any) => {
     // Create a ring to highlight the selected node
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(node.val * 1.2 || 6, node.val * 1.5 || 7.5, 32),
+      new THREE.RingGeometry(node.val * 1.25 || 6.5, node.val * 1.6 || 8, 32),
       new THREE.MeshBasicMaterial({
-        color: 0xffffff,
+        color: node?.color || 0xffffff,
         side: THREE.DoubleSide,
         transparent: true,
-        opacity: 0.8,
+        opacity: 0.9,
       })
     );
     
