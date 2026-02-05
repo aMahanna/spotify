@@ -31,10 +31,14 @@ export default function Home() {
   const [jobGraphId, setJobGraphId] = useState<string | null>(null)
   const [jobStatus, setJobStatus] = useState<"idle" | "queued" | "running" | "ready" | "failed">("idle")
   const [jobError, setJobError] = useState<string | null>(null)
+  const [enrichJobId, setEnrichJobId] = useState<string | null>(null)
+  const [enrichStatus, setEnrichStatus] = useState<"idle" | "queued" | "running" | "ready" | "failed">("idle")
+  const [enrichError, setEnrichError] = useState<string | null>(null)
   const [availablePlaylists, setAvailablePlaylists] = useState<
     { graph_id: string; playlist_url: string; playlist_name?: string }[]
   >([])
   const [selectedGraphId, setSelectedGraphId] = useState<string | null>(null)
+  const [graphRefreshToken, setGraphRefreshToken] = useState<number>(0)
 
   const graphId = searchParams.get("graph_id")
   const effectiveGraphId = graphId || selectedGraphId
@@ -91,6 +95,53 @@ export default function Home() {
   }, [jobId, jobGraphId, router])
 
   useEffect(() => {
+    if (!enrichJobId) return
+
+    let isActive = true
+    let interval: ReturnType<typeof setInterval> | null = null
+
+    const pollStatus = async () => {
+      try {
+        const response = await fetch(`http://localhost:5000/api/playlist/status/${enrichJobId}`)
+        if (!response.ok) {
+          const text = await response.text()
+          throw new Error(text || `Status check failed: ${response.status}`)
+        }
+        const data = await response.json()
+        const status = data?.status as typeof enrichStatus
+        if (!isActive) return
+        setEnrichStatus(status || "running")
+
+        if (status === "ready") {
+          if (effectiveGraphId) {
+            router.replace(`/?graph_id=${effectiveGraphId}`)
+          }
+          setGraphRefreshToken(Date.now())
+          if (interval) clearInterval(interval)
+          setEnrichJobId(null)
+        } else if (status === "failed") {
+          setEnrichError(data?.error || "Enrichment failed")
+          if (interval) clearInterval(interval)
+          setEnrichJobId(null)
+        }
+      } catch (err) {
+        if (!isActive) return
+        setEnrichError(err instanceof Error ? err.message : "Failed to check enrichment status")
+        setEnrichStatus("failed")
+        if (interval) clearInterval(interval)
+        setEnrichJobId(null)
+      }
+    }
+
+    interval = setInterval(pollStatus, 1500)
+    pollStatus()
+    return () => {
+      isActive = false
+      if (interval) clearInterval(interval)
+    }
+  }, [enrichJobId, effectiveGraphId, router])
+
+  useEffect(() => {
     const loadPlaylists = async () => {
       try {
         const response = await fetch("http://localhost:5000/api/playlists")
@@ -103,7 +154,7 @@ export default function Home() {
       }
     }
     loadPlaylists()
-  }, [jobId, jobStatus])
+  }, [jobId, jobStatus, enrichJobId, enrichStatus])
 
   const handlePlaylistSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -133,6 +184,7 @@ export default function Home() {
   }
 
   const isBuilding = jobStatus === "queued" || jobStatus === "running"
+  const isEnriching = enrichStatus === "queued" || enrichStatus === "running"
   const handleSelectChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const value = event.target.value
     setSelectedGraphId(value || null)
@@ -140,6 +192,31 @@ export default function Home() {
       router.replace(`/?graph_id=${value}`)
     } else {
       router.replace("/")
+    }
+  }
+
+  const handleEnrich = async () => {
+    if (!effectiveGraphId) return
+    setEnrichError(null)
+    setEnrichStatus("queued")
+    setEnrichJobId(null)
+
+    try {
+      const response = await fetch("http://localhost:5000/api/playlist/enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ graph_id: effectiveGraphId })
+      })
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(text || `Enrich request failed: ${response.status}`)
+      }
+      const data = await response.json()
+      setEnrichJobId(data?.job_id || null)
+      setEnrichStatus("running")
+    } catch (err) {
+      setEnrichError(err instanceof Error ? err.message : "Failed to start enrichment")
+      setEnrichStatus("failed")
     }
   }
   return (
@@ -223,9 +300,33 @@ export default function Home() {
               </option>
             ))}
           </select>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleEnrich}
+              disabled={!effectiveGraphId || isEnriching}
+            >
+              {isEnriching ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Enriching...
+                </span>
+              ) : (
+                "Enrich Selected Graph"
+              )}
+            </Button>
+            {enrichError && (
+              <span className="text-sm text-destructive">{enrichError}</span>
+            )}
+          </div>
         </div>
 
-        <VisualizeTab graphId={effectiveGraphId || undefined} />
+        <VisualizeTab
+          key={`${effectiveGraphId || "latest"}-${graphRefreshToken}`}
+          graphId={effectiveGraphId || undefined}
+          refreshToken={graphRefreshToken}
+        />
       </main>
     </div>
   )

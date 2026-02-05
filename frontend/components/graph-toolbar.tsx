@@ -65,6 +65,11 @@ interface GraphToolbarProps {
   // Stats
   nodeCount: number
   edgeCount: number
+
+  // Enrichment
+  onEnrich: () => void
+  enriching: boolean
+  enrichDisabled: boolean
 }
 
 export function GraphToolbar({
@@ -84,7 +89,10 @@ export function GraphToolbar({
   onSearch,
   searchInputRef,
   nodeCount,
-  edgeCount
+  edgeCount,
+  onEnrich,
+  enriching,
+  enrichDisabled
 }: GraphToolbarProps) {
   return (
     <TooltipProvider>

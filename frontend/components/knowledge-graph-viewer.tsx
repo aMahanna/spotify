@@ -59,9 +59,10 @@ type GraphData = {
 
 type KnowledgeGraphViewerProps = {
   graphId?: string
+  refreshToken?: number
 }
 
-export function KnowledgeGraphViewer({ graphId }: KnowledgeGraphViewerProps) {
+export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphViewerProps) {
   const { documents } = useDocuments()
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], edges: [] })
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -74,6 +75,10 @@ export function KnowledgeGraphViewer({ graphId }: KnowledgeGraphViewerProps) {
   const [storedTriples, setStoredTriples] = useState<Triple[]>([])
   const [includeStoredTriples, setIncludeStoredTriples] = useState(true)
   const [loadingStoredTriples, setLoadingStoredTriples] = useState(false)
+  const [enrichJobId, setEnrichJobId] = useState<string | null>(null)
+  const [enrichStatus, setEnrichStatus] = useState<"idle" | "queued" | "running" | "ready" | "failed">("idle")
+  const [enrichError, setEnrichError] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
   const graphContainerRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -181,7 +186,51 @@ export function KnowledgeGraphViewer({ graphId }: KnowledgeGraphViewerProps) {
     }
 
     fetchStoredTriples()
-  }, [includeStoredTriples, graphId])
+  }, [includeStoredTriples, graphId, refreshKey, refreshToken])
+
+  useEffect(() => {
+    if (!enrichJobId) return
+
+    let isActive = true
+    let interval: ReturnType<typeof setInterval> | null = null
+
+    const pollStatus = async () => {
+      try {
+        const response = await fetch(`http://localhost:5000/api/playlist/status/${enrichJobId}`)
+        if (!response.ok) {
+          const text = await response.text()
+          throw new Error(text || `Status check failed: ${response.status}`)
+        }
+        const data = await response.json()
+        const status = data?.status as typeof enrichStatus
+        if (!isActive) return
+        setEnrichStatus(status || "running")
+
+        if (status === "ready") {
+          setRefreshKey((current) => current + 1)
+          if (interval) clearInterval(interval)
+          setEnrichJobId(null)
+        } else if (status === "failed") {
+          setEnrichError(data?.error || "Enrichment failed")
+          if (interval) clearInterval(interval)
+          setEnrichJobId(null)
+        }
+      } catch (err) {
+        if (!isActive) return
+        setEnrichError(err instanceof Error ? err.message : "Failed to check enrichment status")
+        setEnrichStatus("failed")
+        if (interval) clearInterval(interval)
+        setEnrichJobId(null)
+      }
+    }
+
+    interval = setInterval(pollStatus, 1500)
+    pollStatus()
+    return () => {
+      isActive = false
+      if (interval) clearInterval(interval)
+    }
+  }, [enrichJobId])
 
   // Generate combined graph data from all processed documents and stored triples
   useEffect(() => {
@@ -356,6 +405,31 @@ export function KnowledgeGraphViewer({ graphId }: KnowledgeGraphViewerProps) {
     }
   }
 
+  const handleEnrich = async () => {
+    if (!graphId) return
+    setEnrichError(null)
+    setEnrichStatus("queued")
+    setEnrichJobId(null)
+
+    try {
+      const response = await fetch("http://localhost:5000/api/playlist/enrich", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ graph_id: graphId })
+      })
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(text || `Enrich request failed: ${response.status}`)
+      }
+      const data = await response.json()
+      setEnrichJobId(data?.job_id || null)
+      setEnrichStatus("running")
+    } catch (error) {
+      setEnrichError(error instanceof Error ? error.message : "Failed to start enrichment")
+      setEnrichStatus("failed")
+    }
+  }
+
   const exportGraph = (format: "json" | "csv" | "png") => {
     switch (format) {
       case "json":
@@ -460,7 +534,13 @@ export function KnowledgeGraphViewer({ graphId }: KnowledgeGraphViewerProps) {
         searchInputRef={searchInputRef}
         nodeCount={graphData.nodes.length}
         edgeCount={graphData.edges.length}
+        onEnrich={handleEnrich}
+        enriching={enrichStatus === "queued" || enrichStatus === "running"}
+        enrichDisabled={!graphId}
       />
+      {enrichError && (
+        <div className="text-sm text-destructive">{enrichError}</div>
+      )}
       
       <div className="space-y-6">
           

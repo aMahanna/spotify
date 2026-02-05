@@ -2192,7 +2192,8 @@ export function ForceGraphWrapper({
           const isSelected = selectedNodeId && nodeId === selectedNodeId;
           const isConnected = selectedNodeId && connectedNodeIds.has(nodeId);
           const camera = graphRef.current.camera();
-          const labelOpacity = Math.max(0.08, getLabelOpacity(node, camera));
+          const labelOpacity = Math.max(0.35, getLabelOpacity(node, camera));
+          const showLabel = shouldShowLabel(node, camera, selectedNodeId, connectedNodeIds);
           
           const group = new THREE.Group();
             
@@ -2201,19 +2202,33 @@ export function ForceGraphWrapper({
             const context = canvas.getContext('2d');
             const text = node.name || node.id;
             
-            if (context) {
+            if (context && showLabel) {
+              const fontSize = isSelected ? 140 : 110;
+              const fontFamily = 'Arial';
+              const paddingX = 120;
+              const paddingY = 60;
+              const minWidth = 420;
+              const maxWidth = 1600;
+              const minHeight = isSelected ? 260 : 220;
+              const maxHeight = 320;
+
+              context.font = isSelected ? `bold ${fontSize}px ${fontFamily}` : `${fontSize}px ${fontFamily}`;
+              const textWidth = context.measureText(text).width;
+              const canvasWidth = Math.min(maxWidth, Math.max(minWidth, textWidth + paddingX));
+              const canvasHeight = Math.min(maxHeight, Math.max(minHeight, fontSize + paddingY));
+
               // Set canvas size
-              canvas.width = 768;
-              canvas.height = 192;
+              canvas.width = canvasWidth;
+              canvas.height = canvasHeight;
+              context.font = isSelected ? `bold ${fontSize}px ${fontFamily}` : `${fontSize}px ${fontFamily}`;
               
               // Draw background
-              const bgAlpha = (isSelected ? 0.85 : 0.65) * labelOpacity;
+              const bgAlpha = (isSelected ? 0.9 : 0.75) * labelOpacity;
               context.fillStyle = `rgba(0, 0, 0, ${bgAlpha})`;
               context.fillRect(0, 0, canvas.width, canvas.height);
               
               // Draw text
-              context.font = isSelected ? 'bold 96px Arial' : '72px Arial';
-              const textAlpha = Math.max(0.15, labelOpacity);
+              const textAlpha = Math.max(0.9, labelOpacity);
               context.fillStyle = `rgba(255, 255, 255, ${textAlpha})`;
               context.textAlign = 'center';
               context.textBaseline = 'middle';
@@ -2232,8 +2247,12 @@ export function ForceGraphWrapper({
               const sprite = new THREE.Sprite(spriteMaterial);
               
               // Scale and position the sprite
-              sprite.scale.set(36, 9, 1);
-              sprite.position.set(0, node.val ? node.val + 10 : 16, 0);
+              const baseWidth = 768;
+              const baseHeight = 192;
+              const scaleX = 60 * (canvas.width / baseWidth);
+              const scaleY = 15 * (canvas.height / baseHeight);
+              sprite.scale.set(scaleX, scaleY, 1);
+              sprite.position.set(0, node.val ? node.val + 18 : 22, 0);
               
               // Add to group
               group.add(sprite);
@@ -2690,10 +2709,10 @@ export function ForceGraphWrapper({
       const distance = nodePosition.distanceTo(cameraPosition);
       
       // Show labels for closer nodes or nodes with many connections
-      const hasHighConnectivity = node.val && node.val > 3;
+      const hasHighConnectivity = node.val && node.val > 5;
       
       // Adjust these thresholds as needed
-      if (distance < 220 || hasHighConnectivity) {
+      if (distance < 140 || hasHighConnectivity) {
         return true;
       }
     }

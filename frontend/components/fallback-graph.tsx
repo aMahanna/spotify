@@ -527,8 +527,8 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
           ctx.fill()
           
           // Draw label text
-          ctx.fillStyle = isHighlightedLink ? "#FFF" : "rgba(255, 255, 255, 0.9)"
-          ctx.font = `${12 / zoom}px sans-serif`
+          ctx.fillStyle = "#FFFFFF"
+          ctx.font = `${13 / zoom}px sans-serif`
           ctx.textAlign = "center"
           ctx.textBaseline = "middle"
           ctx.fillText(labelText, labelX, labelY - textHeight / 2)
@@ -574,7 +574,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
         // Draw node label if hovered, selected, or zoom is high enough
         if (isHovered || isSelected || zoom > 1.2 || isHighlighted) {
           const labelText = String(node.label)
-          const fontSize = isHighlighted || isSelected ? 14 / zoom : 12 / zoom
+          const fontSize = isHighlighted || isSelected ? 16 / zoom : 14 / zoom
           ctx.font = `${fontSize}px sans-serif`
           ctx.textAlign = "center"
           ctx.textBaseline = "middle"
@@ -584,8 +584,8 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
           const textHeight = 20 / zoom
           
           ctx.fillStyle = isHighlighted 
-            ? "rgba(255, 153, 0, 0.8)" 
-            : (isSelected ? "rgba(0, 128, 255, 0.8)" : "rgba(0, 0, 0, 0.7)")
+            ? "rgba(255, 153, 0, 0.75)" 
+            : (isSelected ? "rgba(0, 128, 255, 0.75)" : "rgba(0, 0, 0, 0.55)")
           ctx.beginPath()
           ctx.roundRect(
             x - textWidth / 2,
@@ -597,7 +597,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
           ctx.fill()
           
           // Draw text
-          ctx.fillStyle = "rgba(255, 255, 255, 0.95)"
+          ctx.fillStyle = "#FFFFFF"
           ctx.fillText(labelText, x, y + radius + 4 / zoom + textHeight / 2)
         }
       })
@@ -831,13 +831,13 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
               const midY = (sy + ty) / 2
 
               // Background for label
-              ctx.font = "10px Inter, sans-serif"
+              ctx.font = "12px Inter, sans-serif"
               const labelWidth = ctx.measureText(link.label).width + 8
-              ctx.fillStyle = "rgba(0, 0, 0, 0.7)"
+              ctx.fillStyle = "rgba(0, 0, 0, 0.55)"
               ctx.fillRect(midX - labelWidth / 2, midY - 10, labelWidth, 20)
 
               // Label text
-              ctx.fillStyle = "white"
+              ctx.fillStyle = "#FFFFFF"
               ctx.textAlign = "center"
               ctx.textBaseline = "middle"
               ctx.fillText(link.label, midX, midY)
@@ -876,8 +876,8 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
           // Draw node label
           ctx.font =
             node.id === hoveredNode || node.id === selectedNodeId
-              ? "bold 12px Inter, sans-serif"
-              : "11px Inter, sans-serif"
+              ? "bold 13px Inter, sans-serif"
+              : "12px Inter, sans-serif"
 
           ctx.fillStyle = "rgba(255, 255, 255, 0.9)"
           ctx.textAlign = "center"
@@ -893,11 +893,11 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
             const labelHeight = 20
 
             // Always add background for important nodes
-            ctx.fillStyle = "rgba(0, 0, 0, 0.8)"
+            ctx.fillStyle = "rgba(0, 0, 0, 0.55)"
             ctx.fillRect(x - labelWidth / 2, y + radius + 4, labelWidth, labelHeight)
 
             // Text color
-            ctx.fillStyle = isHighlightedNode ? "white" : "rgba(255, 255, 255, 0.9)"
+            ctx.fillStyle = "#FFFFFF"
             ctx.fillText(node.label, x, y + radius + 14)
           }
         }
@@ -1046,7 +1046,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
             const isHighlightedNode = node.id === hoveredNode || isSelected;
             
             if (isImportantNode || isHighlightedNode) {
-              ctx.font = isSelected ? "bold 12px Inter, sans-serif" : "11px Inter, sans-serif";
+              ctx.font = isSelected ? "bold 13px Inter, sans-serif" : "12px Inter, sans-serif";
               
               // Background for label
               const labelWidth = ctx.measureText(node.label).width + 8;
@@ -1054,17 +1054,17 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
               
               // Add background
               if (isSelected) {
-                ctx.fillStyle = "rgba(0, 128, 0, 0.9)";
+                ctx.fillStyle = "rgba(0, 128, 0, 0.75)";
               } else if (isConnectedToSelected) {
-                ctx.fillStyle = "rgba(0, 64, 128, 0.9)";
+                ctx.fillStyle = "rgba(0, 64, 128, 0.75)";
               } else {
-                ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+                ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
               }
               
               ctx.fillRect(x - labelWidth / 2, y + radius + 4, labelWidth, labelHeight);
               
               // Text color
-              ctx.fillStyle = "white";
+              ctx.fillStyle = "#FFFFFF";
               ctx.textAlign = "center";
               ctx.textBaseline = "middle";
               ctx.fillText(node.label, x, y + radius + 14);

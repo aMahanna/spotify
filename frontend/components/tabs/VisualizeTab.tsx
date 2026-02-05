@@ -19,9 +19,10 @@ import { Eye } from "lucide-react"
 
 type VisualizeTabProps = {
   graphId?: string | null
+  refreshToken?: number
 }
 
-export function VisualizeTab({ graphId }: VisualizeTabProps) {
+export function VisualizeTab({ graphId, refreshToken }: VisualizeTabProps) {
   return (
     <div className="nvidia-build-card p-0 overflow-hidden">
       <div className="p-6 border-b border-border/10">
@@ -37,7 +38,7 @@ export function VisualizeTab({ graphId }: VisualizeTabProps) {
       </div>
       
       <div className="p-6">
-        <KnowledgeGraphViewer graphId={graphId || undefined} />
+        <KnowledgeGraphViewer graphId={graphId || undefined} refreshToken={refreshToken} />
       </div>
     </div>
   )

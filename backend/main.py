@@ -10,7 +10,7 @@ from arango import ArangoClient
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from playlist import DB_NAME, DB_PASSWORD, GRAPH_JOBS_COLLECTION, build_and_upload_graph
+from playlist import DB_NAME, DB_PASSWORD, GRAPH_JOBS_COLLECTION, build_and_upload_graph, enrich_graph
 
 app = Flask(__name__)
 CORS(app)
@@ -60,6 +60,13 @@ def _find_job_by_playlist_url(db, playlist_url: str) -> dict | None:
     if not db.has_collection(GRAPH_JOBS_COLLECTION):
         return None
     jobs = db.collection(GRAPH_JOBS_COLLECTION).find({"playlist_url": playlist_url}, limit=1)
+    return next(jobs, None)
+
+
+def _find_job_by_graph_id(db, graph_id: str) -> dict | None:
+    if not db.has_collection(GRAPH_JOBS_COLLECTION):
+        return None
+    jobs = db.collection(GRAPH_JOBS_COLLECTION).find({"graph_id": graph_id}, limit=1)
     return next(jobs, None)
 
 
@@ -166,6 +173,61 @@ def build_playlist_graph():
     ).start()
 
     return jsonify({"job_id": job_doc["job_id"], "graph_id": job_doc["graph_id"]})
+
+
+@app.route("/api/playlist/enrich", methods=["POST"])
+def enrich_playlist_graph():
+    payload = request.get_json(silent=True) or {}
+    graph_id = payload.get("graph_id")
+    if not graph_id:
+        return jsonify({"error": "graph_id is required"}), 400
+
+    db = _get_db()
+    _ensure_jobs_collection(db)
+    job_doc = _find_job_by_graph_id(db, graph_id)
+    if not job_doc:
+        return jsonify({"error": "graph_id not found"}), 404
+
+    playlist_url = payload.get("playlist_url") or job_doc.get("playlist_url")
+    if not playlist_url:
+        return jsonify({"error": "playlist_url is required"}), 400
+
+    _update_job(
+        db,
+        job_doc["job_id"],
+        {
+            "status": "queued",
+            "error": None,
+        },
+    )
+
+    def _run_enrichment(job_id: str, url: str, graph_id_value: str) -> None:
+        job_db = _get_db()
+        try:
+            _update_job(job_db, job_id, {"status": "running"})
+            node_count, edge_count, collection_map = enrich_graph(url, graph_id_value)
+            _update_job(
+                job_db,
+                job_id,
+                {
+                    "status": "ready",
+                    "node_count": node_count,
+                    "edge_count": edge_count,
+                    "collection_map": collection_map,
+                    "playlist_name": collection_map.get("playlist_name"),
+                    "enriched_at": _utc_now(),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            _update_job(job_db, job_id, {"status": "failed", "error": str(exc)})
+
+    threading.Thread(
+        target=_run_enrichment,
+        args=(job_doc["job_id"], playlist_url, graph_id),
+        daemon=True,
+    ).start()
+
+    return jsonify({"job_id": job_doc["job_id"], "graph_id": graph_id})
 
 
 @app.route("/api/playlist/status/<job_id>", methods=["GET"])
