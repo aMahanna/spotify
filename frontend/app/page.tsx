@@ -336,7 +336,7 @@ export default function Home() {
               type="button"
               variant="outline"
               onClick={handleEnrich}
-              disabled={!effectiveGraphId || isEnriching}
+              disabled={!effectiveGraphId || isEnriching || isBuilding}
             >
               {isEnriching ? (
                 <span className="inline-flex items-center gap-2">
@@ -357,6 +357,7 @@ export default function Home() {
           key={`${effectiveGraphId || "latest"}-${graphRefreshToken}`}
           graphId={effectiveGraphId || undefined}
           refreshToken={graphRefreshToken}
+          isBuilding={isBuilding}
         />
       </main>
     </div>

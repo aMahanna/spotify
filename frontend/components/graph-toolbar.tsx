@@ -150,7 +150,7 @@ export function GraphToolbar({
           <Separator orientation="vertical" className="h-6 hidden md:block" />
 
           {/* Data Source Controls */}
-          <div className="flex items-center gap-2">
+          {/* <div className="flex items-center gap-2">
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="flex items-center gap-2">
@@ -174,15 +174,15 @@ export function GraphToolbar({
                 Include stored triples from database ({storedTriplesCount} available)
               </TooltipContent>
             </Tooltip>
-          </div>
+          </div> */}
 
           {/* Stats (on larger screens) */}
-          <div className="hidden lg:flex items-center gap-2 text-xs text-muted-foreground">
+          {/* <div className="hidden lg:flex items-center gap-2 text-xs text-muted-foreground">
             <Separator orientation="vertical" className="h-6" />
             <span>{nodeCount} nodes</span>
             <span>•</span>
             <span>{edgeCount} edges</span>
-          </div>
+          </div> */}
 
           {/* Search */}
           <div className="flex items-center gap-2 min-w-0">
@@ -191,7 +191,7 @@ export function GraphToolbar({
               <Input
                 ref={searchInputRef || undefined}
                 type="text"
-                placeholder="Search nodes... (Ctrl+K)"
+                placeholder="Find a node..."
                 value={searchTerm}
                 onChange={(e) => onSearchChange(e.target.value)}
                 onKeyDown={(e) => {
@@ -242,7 +242,7 @@ export function GraphToolbar({
             </DropdownMenu>
 
             {/* Help/Shortcuts */}
-            <Tooltip>
+            {/* <Tooltip>
               <TooltipTrigger asChild>
                 <Button 
                   size="sm" 
@@ -263,7 +263,7 @@ export function GraphToolbar({
                   <div className="flex justify-between"><span>Shift+3</span><span>Radial layout</span></div>
                 </div>
               </TooltipContent>
-            </Tooltip>
+            </Tooltip> */}
           </div>
         </div>
       </div>

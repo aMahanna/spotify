@@ -28,9 +28,9 @@ type GraphChatPanelProps = {
 
 const FIXED_QUESTIONS = [
   { id: "themes", label: "What are the themes around this playlist?" },
-  { id: "collabs", label: "Which artists have worked together that are part of this playlist?" },
+  { id: "collabs", label: "Which artists have worked together?" },
   { id: "fun_facts", label: "What is a fun fact about this playlist?" },
-  { id: "tour", label: "Give me a Tour" },
+  { id: "tour", label: "Give me a tour" },
 ]
 
 export function GraphChatPanel({ graphData, onTourStart, tourSignal, tourStepMs = 3200 }: GraphChatPanelProps) {
@@ -359,9 +359,6 @@ export function GraphChatPanel({ graphData, onTourStart, tourSignal, tourStepMs 
               <GripVertical className="h-4 w-4 text-gray-400" />
               <div>
                 <CardTitle className="text-sm">Playlist Chat</CardTitle>
-                <CardDescription className="text-xs text-gray-400">
-                  Ask questions about the current knowledge graph.
-                </CardDescription>
               </div>
             </div>
             <button
@@ -420,14 +417,14 @@ export function GraphChatPanel({ graphData, onTourStart, tourSignal, tourStepMs 
 
           {error && <div className="text-xs text-red-400">{error}</div>}
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 justify-start">
             {FIXED_QUESTIONS.map((question) => (
               <button
                 key={question.id}
                 type="button"
                 disabled={isStreaming}
                 onClick={() => handleSend(question.id, question.label)}
-                className="rounded-md border border-gray-700 bg-gray-900/70 px-2 py-1 text-[11px] text-gray-200 hover:bg-gray-800"
+                className="rounded-md border border-gray-700 bg-gray-900/70 px-2 py-1 text-[11px] text-gray-200 hover:bg-gray-800 text-left"
               >
                 {question.label}
               </button>

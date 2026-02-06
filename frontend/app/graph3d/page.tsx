@@ -272,7 +272,14 @@ export default function Graph3DPage() {
   )
 
   const handleSearch = useCallback(() => {
-    const term = searchTerm.trim().toLowerCase()
+    const normalizeText = (value: string) =>
+      value
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim()
+
+    const term = normalizeText(searchTerm)
     if (!term) {
       setHighlightedNodes([])
       setSelectedNodeId(null)
@@ -280,7 +287,7 @@ export default function Graph3DPage() {
     }
     const nodes = Array.isArray(graphData?.nodes) ? graphData.nodes : []
     const match = nodes.find((node: any) => {
-      const name = String(node?.name || node?.label || node?.id || "").toLowerCase()
+      const name = normalizeText(String(node?.name || node?.label || node?.id || ""))
       return name.includes(term)
     })
     if (!match) {
@@ -638,7 +645,7 @@ export default function Graph3DPage() {
                       handleSearch()
                     }
                   }}
-                  placeholder="Search nodes..."
+                  placeholder="Find a node..."
                   className="h-7 bg-gray-900/80 border-gray-700 text-xs text-gray-200 w-56"
                 />
                 <Button
@@ -653,7 +660,7 @@ export default function Graph3DPage() {
             </div>
           )}
           {isFullscreen && (
-            <div className="absolute top-3 left-4 z-50">
+            <div className="absolute top-20 left-4 z-50">
               <Button
                 type="button"
                 size="sm"
@@ -671,13 +678,13 @@ export default function Graph3DPage() {
             </div>
           )}
           {/* Clustering Toggle */}
-          <button
+          {/* <button
             onClick={() => setShowClusteringControls(!showClusteringControls)}
             className="absolute top-20 left-4 z-50 bg-blue-800/80 hover:bg-blue-700/80 px-3 py-1 rounded text-xs text-white border border-blue-600 transition-colors flex items-center gap-1"
           >
             <Settings className="w-3 h-3" />
             Clustering
-          </button>
+          </button> */}
 
           {/* Controls Panel */}
           <div className="absolute top-20 left-2 z-50 flex flex-col gap-2 max-w-sm">

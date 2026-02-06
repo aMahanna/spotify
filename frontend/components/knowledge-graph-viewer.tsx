@@ -60,9 +60,10 @@ type GraphData = {
 type KnowledgeGraphViewerProps = {
   graphId?: string
   refreshToken?: number
+  isBuilding?: boolean
 }
 
-export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphViewerProps) {
+export function KnowledgeGraphViewer({ graphId, refreshToken, isBuilding }: KnowledgeGraphViewerProps) {
   const { documents } = useDocuments()
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], edges: [] })
   const [searchTerm, setSearchTerm] = useState("")
@@ -469,7 +470,7 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
         edgeCount={graphData.edges.length}
         onEnrich={handleEnrich}
         enriching={enrichStatus === "queued" || enrichStatus === "running"}
-        enrichDisabled={!graphId}
+        enrichDisabled={!graphId || !!isBuilding}
       />
       {enrichError && (
         <div className="text-sm text-destructive">{enrichError}</div>

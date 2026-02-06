@@ -24,7 +24,7 @@ QUESTION_DEFS = {
         "focus": "Summarize recurring genres, moods, topics, and artistic themes.",
     },
     "collabs": {
-        "label": "Which artists have worked together that are part of this playlist?",
+        "label": "Which artists have worked together?",
         "focus": "Highlight artist collaborations, shared tracks, or direct relationships.",
     },
     "fun_facts": {
@@ -32,7 +32,7 @@ QUESTION_DEFS = {
         "focus": "Share exactly one interesting, short fact from the graph (stat, rare item, or notable node).",
     },
     "tour": {
-        "label": "Give me a Tour",
+        "label": "Give me a tour",
         "focus": "Provide a brief guided tour of the most central nodes in the graph.",
     },
     "selection_summary": {
@@ -621,7 +621,7 @@ def chat_stream():
             "You are an expert music analyst helping users understand a playlist "
             "knowledge graph. Use the provided graph data to answer questions. "
             "If the graph data is incomplete, add a brief caveat at the end (one short sentence) "
-            "and still answer. Keep the response to a maximum of 5 sentences. "
+            "and still answer. Keep the response to 2 to 3 short sentences max. "
             "Avoid bullet lists unless explicitly asked. Do not preface answers with filler phrases. "
             "The graph payload is tailored to the requested question."
         )
@@ -630,6 +630,12 @@ def chat_stream():
                 "You are an expert music analyst guiding a user through a playlist knowledge graph. "
                 "Use the provided tour nodes to narrate a guided tour. "
                 "Keep each step to one short sentence."
+            )
+        if question_id == "selection_summary":
+            system_prompt = (
+                "You are an expert music analyst summarizing a selected cluster in a playlist knowledge graph. "
+                "Be concise: 2 to 3 short sentences max. "
+                "Avoid bullet lists and avoid prefacing with filler phrases."
             )
 
         if question_id == "themes":
@@ -670,8 +676,16 @@ def chat_stream():
             user_prompt = (
                 f"Question: {question_def['label']}\n"
                 f"Focus: {question_def['focus']}\n"
-                "Response format: 1 short paragraph, maximum 5 sentences, no bullet lists.\n"
+                "Response format: 1 short paragraph, 2 to 3 short sentences, no bullet lists.\n"
                 "Avoid prefacing with phrases like \"A fun fact from the graph\" or similar.\n"
+                f"Context:\n{graph_payload}"
+            )
+        if question_id == "selection_summary":
+            user_prompt = (
+                f"Question: {question_def['label']}\n"
+                f"Focus: {question_def['focus']}\n"
+                "Response format: 2 to 3 short sentences, no bullet lists, no extra intro or outro.\n"
+                "Keep it concise and specific to the selected cluster.\n"
                 f"Context:\n{graph_payload}"
             )
 
