@@ -1,5 +1,7 @@
 flask==3.0.0
 flask-cors==4.0.0
+python-dotenv
+openai
 python-arango
 cityhash
 spotifyscraper

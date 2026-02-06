@@ -342,18 +342,8 @@ export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphVi
       return
     }
 
-    const graphPayload = { nodes: graphDocuments.nodes, edges: graphDocuments.edges }
-    const storageId = `graph_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`
-    try {
-      localStorage.setItem(storageId, JSON.stringify(graphPayload))
-      params.set("storageId", storageId)
-      window.location.href = `/graph3d?${params.toString()}`
-    } catch (storageError) {
-      console.error("localStorage failed:", storageError)
-      const currentTriples = getTriples()
-      params.set("triples", JSON.stringify(currentTriples))
-      window.location.href = `/graph3d?${params.toString()}`
-    }
+    params.set("source", "stored")
+    window.location.href = `/graph3d?${params.toString()}`
   }
 
   const handleEnrich = async () => {

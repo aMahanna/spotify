@@ -54,6 +54,7 @@ import { Loader2, Cpu, Monitor, Settings, Brain, Layers, Zap, ChevronDown, Chevr
 import { useToast } from "@/hooks/use-toast"
 import { GraphLegend } from "@/components/graph-legend"
 import { getEdgeColor, getNodeColor } from "@/lib/collection-colors"
+import { GraphChatPanel } from "@/components/graph-chat-panel"
 
 // Dynamically import the ForceGraphWrapper component with SSR disabled
 const ForceGraphWrapper = dynamic(
@@ -257,14 +258,10 @@ export default function Graph3DPage() {
         // Check URL parameters
         const params = new URLSearchParams(window.location.search)
         const graphId = params.get("id")
-        const triplesParam = params.get("triples")
-        const nodesParam = params.get("nodes")
-        const edgesParam = params.get("edges")
         const layoutParam = params.get("layout")
         const highlightedNodesParam = params.get("highlightedNodes")
         const selectedNodeParam = params.get("selectedNodeId") || params.get("selectedNode")
         const fullscreenParam = params.get("fullscreen")
-        const storageId = params.get("storageId")
         const source = params.get("source")
         
         // Set layout type from URL parameter
@@ -292,136 +289,15 @@ export default function Graph3DPage() {
         
         console.log("URL parameters:", { 
           graphId: graphId || "not provided", 
-          hasTriples: !!triplesParam,
-          hasNodes: !!nodesParam,
-          hasEdges: !!edgesParam,
-          hasStorageId: !!storageId,
+          hasTriples: false,
+          hasNodes: false,
+          hasEdges: false,
+          hasStorageId: false,
           layout: layoutParam || "default",
           highlightedNodes: highlightedNodesParam ? "provided" : "not provided",
           source: source || "auto",
           allParams: Object.fromEntries(params.entries())
         });
-        
-        // Try to load from localStorage if storageId is provided
-        if (storageId) {
-          try {
-            console.log("Found storageId in URL, attempting to retrieve data from localStorage:", storageId);
-            const storedData = localStorage.getItem(storageId);
-            
-            if (!storedData) {
-              console.error("No data found in localStorage for storageId:", storageId);
-              setError("Could not find the graph data in your browser storage. It may have expired.");
-              setIsLoading(false);
-              return;
-            }
-            
-            const parsedData = JSON.parse(storedData);
-            if (Array.isArray(parsedData)) {
-              console.log("Successfully retrieved triples from localStorage:", { 
-                count: parsedData.length,
-                sample: parsedData.slice(0, 2)
-              });
-              setGraphData({ triples: parsedData });
-            } else if (parsedData?.nodes && parsedData?.edges) {
-              console.log("Successfully retrieved nodes/edges from localStorage:", { 
-                nodes: parsedData.nodes.length,
-                edges: parsedData.edges.length
-              });
-              const nodesWithColors = Array.isArray(parsedData.nodes)
-                ? parsedData.nodes.map((node: any) => ({
-                    ...node,
-                    color: node.color || getNodeColor(node)
-                  }))
-                : []
-              const links = Array.isArray(parsedData.links) ? parsedData.links : parsedData.edges
-                .map((edge: any) => {
-                  if (!edge?._from || !edge?._to || !edge?.label) return null
-                  return {
-                    id: edge._id,
-                    source: edge._from,
-                    target: edge._to,
-                    name: edge.label,
-                    color: getEdgeColor(edge)
-                  }
-                })
-                .filter(Boolean)
-              setGraphData({ nodes: nodesWithColors, edges: parsedData.edges, links });
-            } else {
-              throw new Error("Invalid data in localStorage");
-            }
-            // setDebugInfo(`Using stored graph data from browser storage (ID: ${storageId})`);
-            setIsLoading(false);
-            
-            // Clean up localStorage after retrieval to prevent buildup
-            // Only do this for older IDs to prevent issues with multiple tabs/windows
-            const currentTime = Date.now();
-            const idTimestamp = parseInt(storageId.split('_')[1] || '0', 10);
-            
-            // If the ID is older than 5 minutes, clean it up
-            if (currentTime - idTimestamp > 5 * 60 * 1000) {
-              console.log("Cleaning up old localStorage entry:", storageId);
-              localStorage.removeItem(storageId);
-            }
-            
-            return;
-          } catch (storageError) {
-            console.error("Error retrieving data from localStorage:", storageError);
-            setDebugInfo("Failed to retrieve triples from browser storage, falling back to API");
-            // Continue to other methods if parsing fails
-          }
-        }
-        
-        // If we have triples passed directly in the URL param
-        if (nodesParam && edgesParam) {
-          try {
-            console.log("Found nodes/edges data in URL parameters, attempting to parse")
-            const nodes = JSON.parse(decodeURIComponent(nodesParam))
-            const edges = JSON.parse(decodeURIComponent(edgesParam))
-            console.log("Successfully parsed nodes/edges from URL:", { 
-              nodeCount: nodes.length,
-              edgeCount: edges.length
-            });
-            const nodesWithColors = Array.isArray(nodes)
-              ? nodes.map((node: any) => ({
-                  ...node,
-                  color: node.color || getNodeColor(node)
-                }))
-              : []
-            const links = edges
-              .map((edge: any) => {
-                if (!edge?._from || !edge?._to || !edge?.label) return null
-                return { source: edge._from, target: edge._to, name: edge.label }
-              })
-              .filter(Boolean)
-            setGraphData({ nodes: nodesWithColors, edges, links })
-            setDebugInfo("Using nodes/edges data from URL parameters")
-            setIsLoading(false)
-            return
-          } catch (parseError) {
-            console.error("Error parsing nodes/edges from URL:", parseError)
-            setDebugInfo("Failed to parse nodes/edges from URL, falling back to API")
-            // Continue to other methods if parsing fails
-          }
-        }
-
-        if (triplesParam) {
-          try {
-            console.log("Found triples data in URL parameter, attempting to parse")
-            const triples = JSON.parse(decodeURIComponent(triplesParam))
-            console.log("Successfully parsed triples from URL:", { 
-              count: triples.length,
-              sample: triples.slice(0, 2)
-            });
-            setGraphData({ triples })
-            setDebugInfo("Using triples data from URL parameter")
-            setIsLoading(false)
-            return
-          } catch (parseError) {
-            console.error("Error parsing triples from URL:", parseError)
-            setDebugInfo("Failed to parse triples from URL, falling back to API")
-            // Continue to other methods if parsing fails
-          }
-        }
         
         if (source === "message") {
           setGraphData(null);
@@ -437,7 +313,7 @@ export default function Graph3DPage() {
         
         if (graphId) {
           endpoint = `/api/graph-data?id=${graphId}`;
-        } else if (source === 'stored' || (!triplesParam && !nodesParam && !edgesParam && !storageId)) {
+        } else if (source === 'stored') {
           // Use stored triples if explicitly requested or if no other data source is available
           endpoint = '/api/graph-db/triples';
           useStoredTriples = true;
@@ -641,7 +517,7 @@ export default function Graph3DPage() {
       {graphData && (
         <>
           {isFullscreen && (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50">
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50">
               <div className="flex items-center gap-2 bg-gray-800/80 px-3 py-2 rounded text-xs text-gray-300 shadow">
                 <Input
                   value={searchTerm}
@@ -665,43 +541,29 @@ export default function Graph3DPage() {
               </div>
             </div>
           )}
+          {isFullscreen && (
+            <div className="absolute top-3 left-4 z-50">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => (window.location.href = "/")}
+                className="h-7 px-2 text-xs bg-gray-800/80 hover:bg-gray-700/80 border border-gray-600 text-gray-200"
+              >
+                Back to Home
+              </Button>
+            </div>
+          )}
+          {/* Clustering Toggle */}
+          <button
+            onClick={() => setShowClusteringControls(!showClusteringControls)}
+            className="absolute top-20 left-4 z-50 bg-blue-800/80 hover:bg-blue-700/80 px-3 py-1 rounded text-xs text-white border border-blue-600 transition-colors flex items-center gap-1"
+          >
+            <Settings className="w-3 h-3" />
+            Clustering
+          </button>
+
           {/* Controls Panel */}
           <div className="absolute top-20 left-2 z-50 flex flex-col gap-2 max-w-sm">
-            {/* Main Controls Row */}
-            <div className="flex items-center gap-4">
-              {/* <div className="text-xs text-gray-500">
-                {graphData.nodes && graphData.links ? (
-                  `Rendering graph with ${graphData.nodes.length || 0} nodes and ${graphData.links.length || 0} links`
-                ) : graphData.triples ? (
-                  `Rendering graph from ${graphData.triples.length || 0} triples`
-                ) : (
-                  "Rendering graph data"
-                )}
-              </div> */}
-              
-              {/* WebGPU Mode Toggle */}
-              {/* <button
-                onClick={() => setUseEnhancedWebGPU(!useEnhancedWebGPU)}
-                className="bg-gray-800/80 hover:bg-gray-700/80 px-3 py-1 rounded text-xs text-white border border-gray-600 transition-colors"
-              >
-                {useEnhancedWebGPU ? '🔧 Enhanced WebGPU' : '🎮 Standard 3D'}
-              </button> */}
-              
-              {/* Clustering Controls Toggle */}
-              <button
-                onClick={() => setShowClusteringControls(!showClusteringControls)}
-                className="bg-blue-800/80 hover:bg-blue-700/80 px-3 py-1 rounded text-xs text-white border border-blue-600 transition-colors flex items-center gap-1"
-              >
-                <Settings className="w-3 h-3" />
-                Clustering
-              </button>
-              
-            </div>
-
-            {/* Debug Info */}
-            {debugInfo && (
-              <div className="bg-gray-800/80 px-2 py-1 rounded text-xs text-gray-300">{debugInfo}</div>
-            )}
             {/* Enhanced Clustering Controls Panel */}
             {showClusteringControls && (
               <Card className="bg-black/95 border-gray-700 text-white max-w-sm">
@@ -1096,6 +958,7 @@ export default function Graph3DPage() {
             edges={Array.isArray(graphData?.edges) ? graphData.edges : []}
             className="absolute bottom-2 right-2 z-50 max-w-[220px]"
           />
+          <GraphChatPanel graphData={graphData} />
         </>
       )}
     </div>

@@ -3015,7 +3015,7 @@ export function ForceGraphWrapper({
       </button>
 
       {/* Top-Right Info Panel */}
-      <div className="absolute top-4 right-24 z-10 bg-gray-800/80 p-3 rounded text-xs text-gray-300 shadow w-48">
+      <div className="absolute top-4 right-4 z-10 bg-gray-800/80 p-3 rounded text-xs text-gray-300 shadow w-48">
         <p><span className="font-semibold text-white">Mode:</span> {interactionMode}</p>
         <ul className="list-disc list-inside mt-1 space-y-0.5">
           <li>Drag to rotate view</li>
