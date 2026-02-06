@@ -18,6 +18,23 @@ cleanup() {
 
 trap cleanup INT TERM
 
+free_port() {
+    local port="$1"
+    local pids
+    pids="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
+    if [ -z "$pids" ]; then
+        return 0
+    fi
+    echo "Port $port is in use. Stopping process(es): $pids"
+    kill $pids 2>/dev/null || true
+    sleep 1
+    pids="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
+    if [ -n "$pids" ]; then
+        echo "Force stopping process(es) on port $port: $pids"
+        kill -9 $pids 2>/dev/null || true
+    fi
+}
+
 # Setup Python backend
 echo "=== Setting up Python backend ==="
 cd backend
@@ -29,6 +46,8 @@ fi
 
 source .venv/bin/activate
 pip install -q -r requirements.txt
+
+free_port 5000
 
 echo "Starting backend on http://localhost:5000..."
 python main.py &

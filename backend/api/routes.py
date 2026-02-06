@@ -35,6 +35,10 @@ QUESTION_DEFS = {
         "label": "Give me a Tour",
         "focus": "Provide a brief guided tour of the most central nodes in the graph.",
     },
+    "selection_summary": {
+        "label": "Summarize this selected cluster of nodes and edges.",
+        "focus": "Summarize the selected subgraph, noting dominant entities, relationships, and notable patterns.",
+    },
 }
 
 KNOWN_NODE_TYPES = {
@@ -448,6 +452,18 @@ def _summarize_graph(nodes: list[dict], edges: list[dict], triples: list[dict]) 
     }
 
 
+def _build_selection_summary_context(nodes: list[dict], edges: list[dict]) -> dict:
+    compact_nodes = _compact_nodes(nodes)
+    compact_edges = _compact_edges(edges)
+    summary = _summarize_graph(compact_nodes, compact_edges, [])
+    return {
+        **summary,
+        "payload_mode": "selection_summary",
+        "sample_node_names": [_node_name(node) for node in nodes][:CHAT_SAMPLE_LIMIT],
+        "sample_edge_labels": [_edge_label(edge) for edge in edges][:CHAT_SAMPLE_LIMIT],
+    }
+
+
 def _inflate_from_triples(triples: list[dict]) -> tuple[list[dict], list[dict]]:
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
@@ -587,7 +603,9 @@ def chat_stream():
     tour_order = payload.get("tour_order") or []
 
     if question_id not in QUESTION_DEFS:
-        return jsonify({"error": "question_id must be one of: themes, collabs, fun_facts, tour"}), 400
+        return jsonify(
+            {"error": "question_id must be one of: themes, collabs, fun_facts, tour, selection_summary"}
+        ), 400
     if not isinstance(nodes, list) or not isinstance(edges, list) or not isinstance(triples, list):
         return jsonify({"error": "nodes, edges, and triples must be arrays"}), 400
     if not isinstance(tour_order, list):
@@ -620,6 +638,8 @@ def chat_stream():
             graph_context = _build_collabs_context(nodes, edges)
         elif question_id == "fun_facts":
             graph_context = _build_fun_facts_context(nodes, edges)
+        elif question_id == "selection_summary":
+            graph_context = _build_selection_summary_context(nodes, edges)
         else:
             graph_context = _build_tour_context(nodes, edges, tour_order=tour_order)
 

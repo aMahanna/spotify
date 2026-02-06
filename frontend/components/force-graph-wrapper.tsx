@@ -75,6 +75,7 @@ interface ForceGraphWrapperProps {
   highlightedNodes?: string[]
   selectedNodeId?: string | null
   onNodeSelect?: (node: NodeObject | null) => void
+  onSelectionChange?: (selection: { nodes: any[]; edges: any[] }) => void
   focusTransitionMs?: number
   fitViewSignal?: number
   enableClustering?: boolean
@@ -345,6 +346,7 @@ export function ForceGraphWrapper({
   highlightedNodes,
   selectedNodeId,
   onNodeSelect,
+  onSelectionChange,
   focusTransitionMs = 800,
   fitViewSignal,
   enableClustering = false, 
@@ -403,6 +405,18 @@ export function ForceGraphWrapper({
   // Track highlighted nodes for visual emphasis
   const [internalHighlightedNodes, setInternalHighlightedNodes] = useState<Set<string>>(new Set())
   const [highlightLinks, setHighlightLinks] = useState<Set<string>>(new Set())
+
+  // Box selection state
+  const [isBoxSelecting, setIsBoxSelecting] = useState(false)
+  const [boxStart, setBoxStart] = useState<{ x: number; y: number } | null>(null)
+  const [boxEnd, setBoxEnd] = useState<{ x: number; y: number } | null>(null)
+  const [boxSelectedNodeIds, setBoxSelectedNodeIds] = useState<Set<string>>(new Set())
+  const [boxSelectedEdgeIds, setBoxSelectedEdgeIds] = useState<Set<string>>(new Set())
+  const boxSelectionRef = useRef<{ start: { x: number; y: number } | null; end: { x: number; y: number } | null }>({
+    start: null,
+    end: null,
+  })
+  const spacePressedRef = useRef(false)
   
   // Track graph data statistics
   const [graphStats, setGraphStats] = useState<{nodes: number, links: number}>({nodes: 0, links: 0})
@@ -574,6 +588,183 @@ export function ForceGraphWrapper({
     };
   }, [isInitialized]);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.code === "Space") {
+        const target = event.target as HTMLElement | null;
+        const isEditable =
+          target?.isContentEditable ||
+          target?.tagName === "INPUT" ||
+          target?.tagName === "TEXTAREA" ||
+          target?.tagName === "SELECT";
+        if (!isEditable) {
+          event.preventDefault();
+        }
+        spacePressedRef.current = true;
+      }
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code === "Space") {
+        spacePressedRef.current = false;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      spacePressedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    boxSelectionRef.current.start = boxStart;
+    boxSelectionRef.current.end = boxEnd;
+  }, [boxStart, boxEnd]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const container = containerRef.current;
+    const getRelativePoint = (event: PointerEvent) => {
+      const rect = container.getBoundingClientRect();
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+        rect,
+      };
+    };
+
+    const computeSelection = (start: { x: number; y: number }, end: { x: number; y: number }, rect: DOMRect) => {
+      if (!graphData || !graphRef.current) return;
+
+      const camera = graphRef.current.camera?.();
+      if (!camera) return;
+
+      const minX = Math.min(start.x, end.x);
+      const maxX = Math.max(start.x, end.x);
+      const minY = Math.min(start.y, end.y);
+      const maxY = Math.max(start.y, end.y);
+
+      const nextSelectedNodes: any[] = [];
+      const nextSelectedNodeIds = new Set<string>();
+
+      (graphData.nodes || []).forEach((node: any) => {
+        const nodeId = getNodeIdValue(node);
+        if (!nodeId) return;
+        const vector = new THREE.Vector3(node.x || 0, node.y || 0, node.z || 0);
+        vector.project(camera);
+        if (vector.z < -1 || vector.z > 1) return;
+        const screenX = ((vector.x + 1) / 2) * rect.width;
+        const screenY = ((1 - vector.y) / 2) * rect.height;
+        if (screenX >= minX && screenX <= maxX && screenY >= minY && screenY <= maxY) {
+          nextSelectedNodeIds.add(nodeId);
+          nextSelectedNodes.push(node);
+        }
+      });
+
+      const links = Array.isArray(graphData?.links)
+        ? graphData.links
+        : Array.isArray(graphData?.edges)
+          ? graphData.edges
+          : [];
+
+      const nextSelectedEdges: any[] = [];
+      const nextSelectedEdgeIds = new Set<string>();
+
+      links.forEach((link: any) => {
+        const sourceId = getNodeIdValue(link.source ?? link._from);
+        const targetId = getNodeIdValue(link.target ?? link._to);
+        const isSelected =
+          (sourceId && nextSelectedNodeIds.has(sourceId)) ||
+          (targetId && nextSelectedNodeIds.has(targetId));
+        if (!isSelected) return;
+        const linkId = getLinkIdValue({
+          ...link,
+          source: sourceId,
+          target: targetId,
+        });
+        nextSelectedEdgeIds.add(linkId);
+        nextSelectedEdges.push(link);
+      });
+
+      setBoxSelectedNodeIds(nextSelectedNodeIds);
+      setBoxSelectedEdgeIds(nextSelectedEdgeIds);
+      onSelectionChange?.({ nodes: nextSelectedNodes, edges: nextSelectedEdges });
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || !spacePressedRef.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const { x, y } = getRelativePoint(event);
+      setIsBoxSelecting(true);
+      setBoxStart({ x, y });
+      setBoxEnd({ x, y });
+      setSelectedNode(null);
+      setSelectedLink(null);
+      setNodeConnections([]);
+      onNodeSelect?.(null);
+      const controls = graphRef.current?.controls?.();
+      if (controls) {
+        controls.enabled = false;
+      }
+      if (container.setPointerCapture) {
+        try {
+          container.setPointerCapture(event.pointerId);
+        } catch {
+          // Ignore pointer capture errors for non-capturable events.
+        }
+      }
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!isBoxSelecting || !boxSelectionRef.current.start) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const { x, y } = getRelativePoint(event);
+      setBoxEnd({ x, y });
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      if (!isBoxSelecting || !boxSelectionRef.current.start) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const { x, y, rect } = getRelativePoint(event);
+      const start = boxSelectionRef.current.start;
+      const end = { x, y };
+      computeSelection(start, end, rect);
+      setIsBoxSelecting(false);
+      setBoxStart(null);
+      setBoxEnd(null);
+      const controls = graphRef.current?.controls?.();
+      if (controls) {
+        controls.enabled = true;
+      }
+      if (container.releasePointerCapture) {
+        try {
+          container.releasePointerCapture(event.pointerId);
+        } catch {
+          // Ignore pointer capture errors if none was set.
+        }
+      }
+      resetOrbitControlsState();
+    };
+
+    container.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+
+    return () => {
+      container.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [graphData, isBoxSelecting, onNodeSelect, onSelectionChange]);
+
   // Toggle interaction mode
   const toggleInteractionMode = () => {
     const newMode = interactionMode === 'navigation' ? 'selection' : 'navigation';
@@ -638,6 +829,25 @@ export function ForceGraphWrapper({
     if (nodeObj.name !== undefined && nodeObj.name !== null) return String(nodeObj.name);
     if (nodeObj.label !== undefined && nodeObj.label !== null) return String(nodeObj.label);
     return '';
+  };
+
+  const getLinkIdValue = (link: any): string => {
+    if (link?.id !== undefined && link?.id !== null) return String(link.id);
+    if (link?._id !== undefined && link?._id !== null) return String(link._id);
+    const sourceId = getNodeIdValue(link?.source ?? link?._from);
+    const targetId = getNodeIdValue(link?.target ?? link?._to);
+    return `${sourceId}-${targetId}`;
+  };
+
+  const resetOrbitControlsState = () => {
+    const controls = graphRef.current?.controls?.();
+    if (!controls) return;
+    if (typeof (controls as any).state === "number") {
+      (controls as any).state = -1;
+    }
+    if (typeof controls.update === "function") {
+      controls.update();
+    }
   };
 
   // Debug node connections with additional logging
@@ -1040,9 +1250,8 @@ export function ForceGraphWrapper({
             .linkWidth(2)
             .showNavInfo(false)
             .onBackgroundClick(() => {
-              if (selectedNode) {
-                clearSelection();
-              }
+              clearSelection();
+              resetOrbitControlsState();
             });
 
           // Enable panning in 3D controls
@@ -1085,6 +1294,7 @@ export function ForceGraphWrapper({
             setSelectedLink(null);
             handleNodeSelection(node);
             onNodeSelect?.(node);
+            resetOrbitControlsState();
           });
 
           Graph.onLinkClick((link: any) => {
@@ -1092,6 +1302,7 @@ export function ForceGraphWrapper({
             setNodeConnections([]);
             setSelectedLink(buildSelectedLinkInfo(link));
             onNodeSelect?.(null);
+            resetOrbitControlsState();
           });
           
           // Ready for data loading
@@ -1348,7 +1559,10 @@ export function ForceGraphWrapper({
     setSelectedNode(null);
     setNodeConnections([]);
     setSelectedLink(null);
+    setBoxSelectedNodeIds(new Set());
+    setBoxSelectedEdgeIds(new Set());
     onNodeSelect?.(null);
+    onSelectionChange?.({ nodes: [], edges: [] });
     
     // Restore cluster colors if enabled
     if (graphRef.current && enableClusterColors && graphData?.nodes) {
@@ -2218,10 +2432,17 @@ export function ForceGraphWrapper({
           const isSelected = selectedNodeId && nodeId === selectedNodeId;
           const baseColor = node.color || getNodeColor(node);
 
+          if (boxSelectedNodeIds.has(nodeId)) {
+            return '#50fa7b';
+          }
           if (isSelected) return baseColor; // Keep original node color
           return baseColor;
         })
         .linkColor((link: any) => {
+          const linkId = getLinkIdValue(link);
+          if (boxSelectedEdgeIds.has(linkId)) {
+            return '#ffb86c';
+          }
           // Highlight links connected to selected node
           if (selectedNodeId) {
             const sourceId = getNodeIdValue(link.source);
@@ -2245,6 +2466,10 @@ export function ForceGraphWrapper({
           return link.color || '#ffffff40'; // Default semi-transparent white
         })
         .linkWidth((link: any) => {
+          const linkId = getLinkIdValue(link);
+          if (boxSelectedEdgeIds.has(linkId)) {
+            return 3;
+          }
           // Make selected links thicker
           if (selectedNodeId) {
             const sourceId = getNodeIdValue(link.source);
@@ -2362,7 +2587,7 @@ export function ForceGraphWrapper({
     } catch (error) {
       console.error("Error updating graph visual state:", error);
     }
-  }, [selectedNode, nodeConnections, graphData]);
+  }, [selectedNode, nodeConnections, graphData, boxSelectedNodeIds, boxSelectedEdgeIds]);
 
   // Highlight selected link
   useEffect(() => {
@@ -2944,6 +3169,18 @@ export function ForceGraphWrapper({
         className="w-full h-full"
       ></div>
 
+      {isBoxSelecting && boxStart && boxEnd && (
+        <div
+          className="absolute border border-blue-400 bg-blue-400/10 pointer-events-none"
+          style={{
+            left: Math.min(boxStart.x, boxEnd.x),
+            top: Math.min(boxStart.y, boxEnd.y),
+            width: Math.abs(boxEnd.x - boxStart.x),
+            height: Math.abs(boxEnd.y - boxStart.y),
+          }}
+        />
+      )}
+
       {/* Loading Overlay */}
       {isLoading && (
         <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center z-20">
@@ -3026,21 +3263,23 @@ export function ForceGraphWrapper({
         </button> */}
       </div>
 
-      <button
-        onClick={resetView}
-        className="absolute bottom-4 right-4 z-20 px-3 py-1.5 rounded text-white text-xs shadow bg-gray-700/80 hover:bg-gray-600/90 flex items-center gap-2"
-      >
-        <RefreshCw size={14} />
-        Reset View
-      </button>
-
       {/* Top-Right Info Panel */}
       <div className="absolute top-4 right-4 z-10 bg-gray-800/80 p-3 rounded text-xs text-gray-300 shadow w-48">
-        <p><span className="font-semibold text-white">Mode:</span> {interactionMode}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="font-semibold text-white">Mode: {interactionMode}</p>
+          <button
+            onClick={resetView}
+            className="px-2 py-1 rounded text-white text-[10px] shadow bg-gray-700/80 hover:bg-gray-600/90 flex items-center gap-1"
+          >
+            <RefreshCw size={12} />
+            Reset
+          </button>
+        </div>
         <ul className="list-disc list-inside mt-1 space-y-0.5">
           <li>Drag to rotate view</li>
           <li>Scroll to zoom in/out</li>
           <li>Shift+drag to pan</li>
+          <li>Space+drag to box select</li>
         </ul>
         <p className="mt-2 pt-2 border-t border-gray-600/50"><span className="font-semibold text-white">Nodes:</span> {graphStats.nodes} &bull; <span className="font-semibold text-white">Links:</span> {graphStats.links}</p>
         <p className="mt-1"><span className="font-semibold text-white">WebGPU Clustering:</span> 

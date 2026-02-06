@@ -55,6 +55,7 @@ import { useToast } from "@/hooks/use-toast"
 import { GraphLegend } from "@/components/graph-legend"
 import { getEdgeColor, getNodeColor } from "@/lib/collection-colors"
 import { GraphChatPanel } from "@/components/graph-chat-panel"
+import { GraphSelectionPanel } from "@/components/graph-selection-panel"
 import { buildTourOrder, DEFAULT_TOUR_NODE_COUNT } from "@/lib/graph-tour"
 
 // Dynamically import the ForceGraphWrapper component with SSR disabled
@@ -97,6 +98,8 @@ export default function Graph3DPage() {
   const [showClusteringControls, setShowClusteringControls] = useState<boolean>(false)
   const [clusteringOptionsExpanded, setClusteringOptionsExpanded] = useState<boolean>(false)
   const [selectedNodeData, setSelectedNodeData] = useState<any | null>(null)
+  const [selectedNodes, setSelectedNodes] = useState<any[]>([])
+  const [selectedEdges, setSelectedEdges] = useState<any[]>([])
   const [isTourActive, setIsTourActive] = useState<boolean>(false)
   const [tourSignal, setTourSignal] = useState<{
     type: "step" | "done" | "stop"
@@ -187,6 +190,11 @@ export default function Graph3DPage() {
     }
     setSelectedNodeId(String(node.id || node._id || node.name))
     setSelectedNodeData(node)
+  }, [])
+
+  const handleSelectionChange = useCallback((selection: { nodes: any[]; edges: any[] }) => {
+    setSelectedNodes(selection.nodes)
+    setSelectedEdges(selection.edges)
   }, [])
 
   const stopTour = useCallback(() => {
@@ -1032,6 +1040,7 @@ export default function Graph3DPage() {
                 highlightedNodes={highlightedNodes}
                 selectedNodeId={selectedNodeId || undefined}
                 onNodeSelect={handleNodeSelect}
+                onSelectionChange={handleSelectionChange}
                 focusTransitionMs={isTourActive ? TOUR_FOCUS_MS : undefined}
                 fitViewSignal={fitViewNonce}
                 enableClustering={enableClustering}
@@ -1074,6 +1083,12 @@ export default function Graph3DPage() {
             onTourStart={startTour}
             tourSignal={tourSignal}
           />
+          {(selectedNodes.length > 0 || selectedEdges.length > 0) && (
+            <GraphSelectionPanel
+              selectedNodes={selectedNodes}
+              selectedEdges={selectedEdges}
+            />
+          )}
         </>
       )}
     </div>
