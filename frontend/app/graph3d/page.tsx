@@ -546,7 +546,13 @@ export default function Graph3DPage() {
               <Button
                 type="button"
                 size="sm"
-                onClick={() => (window.location.href = "/")}
+                onClick={() => {
+                  const params = new URLSearchParams(window.location.search)
+                  const graphIdParam = params.get("id")
+                  window.location.href = graphIdParam
+                    ? `/?graph_id=${graphIdParam}`
+                    : "/"
+                }}
                 className="h-7 px-2 text-xs bg-gray-800/80 hover:bg-gray-700/80 border border-gray-600 text-gray-200"
               >
                 Back to Home

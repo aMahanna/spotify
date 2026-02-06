@@ -43,6 +43,22 @@ export default function Home() {
 
   const graphId = searchParams.get("graph_id")
   const effectiveGraphId = graphId || selectedGraphId
+  const lastGraphStorageKey = "last_graph_id"
+
+  useEffect(() => {
+    if (graphId) {
+      window.sessionStorage.setItem(lastGraphStorageKey, graphId)
+    }
+  }, [graphId, lastGraphStorageKey])
+
+  useEffect(() => {
+    if (graphId || selectedGraphId) return
+    const storedGraphId = window.sessionStorage.getItem(lastGraphStorageKey)
+    if (storedGraphId) {
+      setSelectedGraphId(storedGraphId)
+      router.replace(`/?graph_id=${storedGraphId}`)
+    }
+  }, [graphId, selectedGraphId, router, lastGraphStorageKey])
 
   const sortedPlaylists = useMemo(() => {
     return [...availablePlaylists].filter((item) => item.graph_id)
