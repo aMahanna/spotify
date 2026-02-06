@@ -16,6 +16,7 @@ type ChatMessage = {
 type GraphChatPanelProps = {
   graphData: any
   onTourStart?: (tourOrder?: string[]) => void
+  tourStepMs?: number
   tourSignal?: {
     type: "step" | "done" | "stop"
     nodeId?: string
@@ -32,7 +33,7 @@ const FIXED_QUESTIONS = [
   { id: "tour", label: "Give me a Tour" },
 ]
 
-export function GraphChatPanel({ graphData, onTourStart, tourSignal }: GraphChatPanelProps) {
+export function GraphChatPanel({ graphData, onTourStart, tourSignal, tourStepMs = 3200 }: GraphChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -47,6 +48,11 @@ export function GraphChatPanel({ graphData, onTourStart, tourSignal }: GraphChat
   const tourLinesRef = useRef<string[]>([])
   const pendingTourStepsRef = useRef(0)
   const tourResponseDoneRef = useRef(false)
+  const tourTimeoutsRef = useRef<number[]>([])
+  const tourTypingRef = useRef(false)
+  const TOUR_END_BUFFER_MS = 600
+  const TOUR_CHAR_MIN_MS = 4
+  const TOUR_CHAR_MAX_MS = 18
 
   const LoadingDots = () => (
     <span className="inline-flex items-center gap-0.5">
@@ -151,25 +157,48 @@ export function GraphChatPanel({ graphData, onTourStart, tourSignal }: GraphChat
     })
   }
 
-  const flushPendingTourLines = () => {
-    while (pendingTourStepsRef.current > 0 && tourLinesRef.current.length > 0) {
-      const nextLine = tourLinesRef.current.shift()
-      if (nextLine) {
-        appendAssistantDelta(`${nextLine}\n`)
+  const processTourQueue = () => {
+    if (tourTypingRef.current) return
+    if (pendingTourStepsRef.current <= 0) return
+    if (tourLinesRef.current.length === 0) return
+
+    const nextLine = tourLinesRef.current.shift()
+    if (!nextLine) return
+
+    const availableMs = Math.max(600, tourStepMs - TOUR_END_BUFFER_MS)
+    const perChar = Math.min(
+      TOUR_CHAR_MAX_MS,
+      Math.max(TOUR_CHAR_MIN_MS, Math.floor(availableMs / Math.max(nextLine.length, 1)))
+    )
+
+    tourTypingRef.current = true
+    let index = 0
+
+    const tick = () => {
+      if (!tourTypingRef.current) return
+      if (index < nextLine.length) {
+        appendAssistantDelta(nextLine[index])
+        index += 1
+        const timeoutId = window.setTimeout(tick, perChar)
+        tourTimeoutsRef.current.push(timeoutId)
+        return
       }
+      appendAssistantDelta("\n")
+      tourTypingRef.current = false
       pendingTourStepsRef.current -= 1
+      processTourQueue()
     }
+
+    tick()
+  }
+
+  const flushPendingTourLines = () => {
+    processTourQueue()
   }
 
   const enqueueTourLine = () => {
-    if (tourLinesRef.current.length > 0) {
-      const nextLine = tourLinesRef.current.shift()
-      if (nextLine) {
-        appendAssistantDelta(`${nextLine}\n`)
-        return
-      }
-    }
     pendingTourStepsRef.current += 1
+    processTourQueue()
   }
 
   const ingestTourText = (delta: string) => {
@@ -179,7 +208,7 @@ export function GraphChatPanel({ graphData, onTourStart, tourSignal }: GraphChat
     const cleaned = parts.map((line) => line.trim()).filter(Boolean)
     if (cleaned.length > 0) {
       tourLinesRef.current.push(...cleaned)
-      flushPendingTourLines()
+      processTourQueue()
     }
   }
 
@@ -204,6 +233,9 @@ export function GraphChatPanel({ graphData, onTourStart, tourSignal }: GraphChat
         tourLinesRef.current = []
         pendingTourStepsRef.current = 0
         tourResponseDoneRef.current = false
+        tourTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId))
+        tourTimeoutsRef.current = []
+        tourTypingRef.current = false
         if (onTourStart) {
           onTourStart(tourOrder)
         } else {
@@ -303,6 +335,13 @@ export function GraphChatPanel({ graphData, onTourStart, tourSignal }: GraphChat
       setIsStreaming(false)
     }
   }, [tourSignal])
+
+  useEffect(() => {
+    return () => {
+      tourTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId))
+      tourTimeoutsRef.current = []
+    }
+  }, [])
 
   return (
     <div

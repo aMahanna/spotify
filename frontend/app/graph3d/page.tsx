@@ -78,8 +78,8 @@ interface PerformanceMetrics {
   memoryUsage?: number
 }
 
-const TOUR_STEP_MS = 3200
-const TOUR_FOCUS_MS = 2200
+const TOUR_STEP_MS = 4608
+const TOUR_FOCUS_MS = 3384
 
 export default function Graph3DPage() {
   const [graphData, setGraphData] = useState<any>(null)
@@ -1082,6 +1082,7 @@ export default function Graph3DPage() {
             graphData={graphData}
             onTourStart={startTour}
             tourSignal={tourSignal}
+            tourStepMs={TOUR_STEP_MS}
           />
           {(selectedNodes.length > 0 || selectedEdges.length > 0) && (
             <GraphSelectionPanel
