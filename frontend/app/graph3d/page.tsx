@@ -36,7 +36,7 @@
  * - /graph3d?source=local&triples=[{"subject":"A","predicate":"relates_to","object":"B"}]
  */
 
-import { useEffect, useState, useCallback, useMemo } from "react"
+import { useEffect, useState, useCallback, useMemo, useRef } from "react"
 import dynamic from "next/dynamic"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -55,6 +55,7 @@ import { useToast } from "@/hooks/use-toast"
 import { GraphLegend } from "@/components/graph-legend"
 import { getEdgeColor, getNodeColor } from "@/lib/collection-colors"
 import { GraphChatPanel } from "@/components/graph-chat-panel"
+import { buildTourOrder, DEFAULT_TOUR_NODE_COUNT } from "@/lib/graph-tour"
 
 // Dynamically import the ForceGraphWrapper component with SSR disabled
 const ForceGraphWrapper = dynamic(
@@ -76,6 +77,9 @@ interface PerformanceMetrics {
   memoryUsage?: number
 }
 
+const TOUR_STEP_MS = 3200
+const TOUR_FOCUS_MS = 2200
+
 export default function Graph3DPage() {
   const [graphData, setGraphData] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -93,6 +97,19 @@ export default function Graph3DPage() {
   const [showClusteringControls, setShowClusteringControls] = useState<boolean>(false)
   const [clusteringOptionsExpanded, setClusteringOptionsExpanded] = useState<boolean>(false)
   const [selectedNodeData, setSelectedNodeData] = useState<any | null>(null)
+  const [isTourActive, setIsTourActive] = useState<boolean>(false)
+  const [tourSignal, setTourSignal] = useState<{
+    type: "step" | "done" | "stop"
+    nodeId?: string
+    index?: number
+    total?: number
+    nonce: number
+  } | null>(null)
+  const [fitViewNonce, setFitViewNonce] = useState(0)
+  const tourOrderRef = useRef<string[]>([])
+  const tourIndexRef = useRef<number>(0)
+  const tourTimerRef = useRef<number | null>(null)
+  const tourSignalNonceRef = useRef<number>(0)
   
   // Semantic clustering options
   const [clusteringMethod, setClusteringMethod] = useState<string>("hybrid")
@@ -172,6 +189,80 @@ export default function Graph3DPage() {
     setSelectedNodeData(node)
   }, [])
 
+  const stopTour = useCallback(() => {
+    if (tourTimerRef.current !== null) {
+      window.clearTimeout(tourTimerRef.current)
+      tourTimerRef.current = null
+    }
+    tourIndexRef.current = 0
+    tourOrderRef.current = []
+    setIsTourActive(false)
+    tourSignalNonceRef.current += 1
+    setTourSignal({ type: "stop", nonce: tourSignalNonceRef.current })
+  }, [])
+
+  const stepTour = useCallback(() => {
+    const order = tourOrderRef.current
+    if (!order.length) {
+      setIsTourActive(false)
+      setHighlightedNodes([])
+      setSelectedNodeId(null)
+      tourSignalNonceRef.current += 1
+      setTourSignal({ type: "done", nonce: tourSignalNonceRef.current })
+      setFitViewNonce((prev) => prev + 1)
+      return
+    }
+    const idx = tourIndexRef.current
+    if (idx >= order.length) {
+      setIsTourActive(false)
+      setHighlightedNodes([])
+      setSelectedNodeId(null)
+      tourSignalNonceRef.current += 1
+      setTourSignal({ type: "done", nonce: tourSignalNonceRef.current })
+      setFitViewNonce((prev) => prev + 1)
+      return
+    }
+    const nodeId = order[idx]
+    setHighlightedNodes([nodeId])
+    setSelectedNodeId(nodeId)
+    tourSignalNonceRef.current += 1
+    setTourSignal({
+      type: "step",
+      nodeId,
+      index: idx,
+      total: order.length,
+      nonce: tourSignalNonceRef.current,
+    })
+    tourIndexRef.current = idx + 1
+    if (tourIndexRef.current < order.length) {
+      tourTimerRef.current = window.setTimeout(stepTour, TOUR_STEP_MS)
+    } else {
+      setIsTourActive(false)
+      setHighlightedNodes([])
+      setSelectedNodeId(null)
+      tourSignalNonceRef.current += 1
+      setTourSignal({ type: "done", nonce: tourSignalNonceRef.current })
+      setFitViewNonce((prev) => prev + 1)
+    }
+  }, [])
+
+  const startTour = useCallback(
+    (overrideOrder?: string[]) => {
+      if (!graphData) return
+      stopTour()
+      const order =
+        overrideOrder && overrideOrder.length > 0
+          ? overrideOrder
+          : buildTourOrder(graphData, DEFAULT_TOUR_NODE_COUNT)
+      if (!order.length) return
+      tourOrderRef.current = order
+      tourIndexRef.current = 0
+      setIsTourActive(true)
+      stepTour()
+    },
+    [graphData, stopTour, stepTour]
+  )
+
   const handleSearch = useCallback(() => {
     const term = searchTerm.trim().toLowerCase()
     if (!term) {
@@ -208,6 +299,18 @@ export default function Graph3DPage() {
     })
     setSelectedNodeData(match || null)
   }, [selectedNodeId, graphData])
+
+  useEffect(() => {
+    if (graphData) {
+      stopTour()
+    }
+  }, [graphData, stopTour])
+
+  useEffect(() => {
+    return () => {
+      stopTour()
+    }
+  }, [stopTour])
 
   const selectedStories = useMemo(() => {
     if (!selectedNodeData || !isSongNode(selectedNodeData)) return []
@@ -438,28 +541,28 @@ export default function Graph3DPage() {
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      const payload = event.data;
-      if (!payload) return;
+      if (event.origin !== window.location.origin) return
+      const payload = event.data
+      if (!payload) return
       if (payload.type === "graph-select") {
         if (Array.isArray(payload.highlightedNodes)) {
-          setHighlightedNodes(payload.highlightedNodes);
+          setHighlightedNodes(payload.highlightedNodes)
         }
         if (typeof payload.selectedNodeId === "string" || payload.selectedNodeId === null) {
-          setSelectedNodeId(payload.selectedNodeId);
+          setSelectedNodeId(payload.selectedNodeId)
         }
-        return;
+        return
       }
       if (payload.type === "graph-data" && payload.payload) {
-        setGraphData(normalizeGraphData(payload.payload));
-        setError(null);
-        setIsLoading(false);
-        setDebugInfo("");
+        setGraphData(normalizeGraphData(payload.payload))
+        setError(null)
+        setIsLoading(false)
+        setDebugInfo("")
       }
-    };
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
-  }, []);
+    }
+    window.addEventListener("message", handleMessage)
+    return () => window.removeEventListener("message", handleMessage)
+  }, [startTour, stopTour, normalizeGraphData])
 
   useEffect(() => {
     // Add overflow: hidden to the body element when the component mounts
@@ -929,6 +1032,8 @@ export default function Graph3DPage() {
                 highlightedNodes={highlightedNodes}
                 selectedNodeId={selectedNodeId || undefined}
                 onNodeSelect={handleNodeSelect}
+                focusTransitionMs={isTourActive ? TOUR_FOCUS_MS : undefined}
+                fitViewSignal={fitViewNonce}
                 enableClustering={enableClustering}
                 enableClusterColors={enableClusterColors}
                 clusteringMode="hybrid" // Default to Hybrid GPU/CPU mode
@@ -964,7 +1069,11 @@ export default function Graph3DPage() {
             edges={Array.isArray(graphData?.edges) ? graphData.edges : []}
             className="absolute bottom-2 right-2 z-50 max-w-[220px]"
           />
-          <GraphChatPanel graphData={graphData} />
+          <GraphChatPanel
+            graphData={graphData}
+            onTourStart={startTour}
+            tourSignal={tourSignal}
+          />
         </>
       )}
     </div>

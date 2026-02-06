@@ -31,6 +31,10 @@ QUESTION_DEFS = {
         "label": "What is a fun fact about this playlist?",
         "focus": "Share exactly one interesting, short fact from the graph (stat, rare item, or notable node).",
     },
+    "tour": {
+        "label": "Give me a Tour",
+        "focus": "Provide a brief guided tour of the most central nodes in the graph.",
+    },
 }
 
 KNOWN_NODE_TYPES = {
@@ -304,6 +308,66 @@ def _build_fun_facts_context(nodes: list[dict], edges: list[dict]) -> dict:
     }
 
 
+def _build_tour_context(
+    nodes: list[dict],
+    edges: list[dict],
+    tour_order: list[str] | None = None,
+    max_nodes: int = 12,
+) -> dict:
+    node_lookup = {_node_id(node): node for node in nodes}
+    name_lookup = {_node_id(node): _node_name(node) for node in nodes}
+
+    adjacency: dict[str, set[str]] = {node_id: set() for node_id in node_lookup.keys()}
+    degree: dict[str, int] = {node_id: 0 for node_id in node_lookup.keys()}
+
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        source = str(edge.get("_from") or edge.get("source") or "")
+        target = str(edge.get("_to") or edge.get("target") or "")
+        if not source or not target:
+            continue
+        if source not in adjacency:
+            adjacency[source] = set()
+            name_lookup.setdefault(source, source)
+        if target not in adjacency:
+            adjacency[target] = set()
+            name_lookup.setdefault(target, target)
+        adjacency[source].add(target)
+        adjacency[target].add(source)
+        degree[source] = degree.get(source, 0) + 1
+        degree[target] = degree.get(target, 0) + 1
+
+    ranked_nodes = sorted(degree.items(), key=lambda item: item[1], reverse=True)
+    selected_nodes = [node_id for node_id, _count in ranked_nodes][:max_nodes]
+
+    if tour_order:
+        ordered_nodes = [node_id for node_id in tour_order if node_id in adjacency]
+        if ordered_nodes:
+            selected_nodes = ordered_nodes
+
+    tour_nodes = []
+    for node_id in selected_nodes:
+        neighbors = sorted(adjacency.get(node_id, set()))
+        neighbor_names = [name_lookup.get(neighbor, neighbor) for neighbor in neighbors[:4]]
+        node = node_lookup.get(node_id, {})
+        tour_nodes.append(
+            {
+                "id": node_id,
+                "name": name_lookup.get(node_id, node_id),
+                "type": _node_type(node),
+                "degree": degree.get(node_id, 0),
+                "neighbors": neighbor_names,
+            }
+        )
+
+    return {
+        "payload_mode": "tour",
+        "counts": {"nodes": len(nodes), "edges": len(edges)},
+        "tour_nodes": tour_nodes,
+    }
+
+
 def _compact_nodes(nodes: list[dict]) -> list[dict]:
     compacted = []
     for node in nodes:
@@ -520,11 +584,14 @@ def chat_stream():
     nodes = payload.get("nodes") or []
     edges = payload.get("edges") or []
     triples = payload.get("triples") or []
+    tour_order = payload.get("tour_order") or []
 
     if question_id not in QUESTION_DEFS:
-        return jsonify({"error": "question_id must be one of: themes, collabs, fun_facts"}), 400
+        return jsonify({"error": "question_id must be one of: themes, collabs, fun_facts, tour"}), 400
     if not isinstance(nodes, list) or not isinstance(edges, list) or not isinstance(triples, list):
         return jsonify({"error": "nodes, edges, and triples must be arrays"}), 400
+    if not isinstance(tour_order, list):
+        return jsonify({"error": "tour_order must be an array"}), 400
     if not os.getenv("OPENAI_API_KEY"):
         return jsonify({"error": "OPENAI_API_KEY is not configured"}), 500
     if not nodes and not edges and triples:
@@ -536,39 +603,63 @@ def chat_stream():
             "You are an expert music analyst helping users understand a playlist "
             "knowledge graph. Use the provided graph data to answer questions. "
             "If the graph data is incomplete, add a brief caveat at the end (one short sentence) "
-            "and still answer. Keep the response to 1 short paragraph (1-2 sentences total). "
+            "and still answer. Keep the response to a maximum of 5 sentences. "
             "Avoid bullet lists unless explicitly asked. Do not preface answers with filler phrases. "
             "The graph payload is tailored to the requested question."
         )
+        if question_id == "tour":
+            system_prompt = (
+                "You are an expert music analyst guiding a user through a playlist knowledge graph. "
+                "Use the provided tour nodes to narrate a guided tour. "
+                "Keep each step to one short sentence."
+            )
 
         if question_id == "themes":
             graph_context = _build_themes_context(nodes, edges)
         elif question_id == "collabs":
             graph_context = _build_collabs_context(nodes, edges)
-        else:
+        elif question_id == "fun_facts":
             graph_context = _build_fun_facts_context(nodes, edges)
+        else:
+            graph_context = _build_tour_context(nodes, edges, tour_order=tour_order)
 
         graph_payload = json.dumps(graph_context, ensure_ascii=True)
         payload_size = len(graph_payload.encode("utf-8"))
 
         if payload_size > CHAT_GRAPH_CAP_BYTES:
-            compact_nodes = _compact_nodes(nodes)
-            compact_edges = _compact_edges(edges)
-            compact_triples = _compact_triples(triples) if not (nodes or edges) else []
-            graph_context = _summarize_graph(compact_nodes, compact_edges, compact_triples)
-            graph_payload = json.dumps(graph_context, ensure_ascii=True)
+            if question_id == "tour":
+                graph_context = _build_tour_context(nodes, edges, tour_order=tour_order, max_nodes=8)
+                graph_payload = json.dumps(graph_context, ensure_ascii=True)
+            else:
+                compact_nodes = _compact_nodes(nodes)
+                compact_edges = _compact_edges(edges)
+                compact_triples = _compact_triples(triples) if not (nodes or edges) else []
+                graph_context = _summarize_graph(compact_nodes, compact_edges, compact_triples)
+                graph_payload = json.dumps(graph_context, ensure_ascii=True)
 
-        user_prompt = (
-            f"Question: {question_def['label']}\n"
-            f"Focus: {question_def['focus']}\n"
-            "Response format: 1 short paragraph (1-2 sentences), no bullet lists.\n"
-            "Avoid prefacing with phrases like \"A fun fact from the graph\" or similar.\n"
-            f"Context:\n{graph_payload}"
-        )
+        if question_id == "tour":
+            user_prompt = (
+                f"Question: {question_def['label']}\n"
+                f"Focus: {question_def['focus']}\n"
+                "Response format: Numbered list, one short sentence per node. "
+                "Start each line with the node name. "
+                "No extra intro or outro.\n"
+                f"Context:\n{graph_payload}"
+            )
+        else:
+            user_prompt = (
+                f"Question: {question_def['label']}\n"
+                f"Focus: {question_def['focus']}\n"
+                "Response format: 1 short paragraph, maximum 5 sentences, no bullet lists.\n"
+                "Avoid prefacing with phrases like \"A fun fact from the graph\" or similar.\n"
+                f"Context:\n{graph_payload}"
+            )
 
         temperature = 0.4
         if question_id == "fun_facts":
             temperature = 0.7
+        if question_id == "tour":
+            temperature = 0.5
 
         try:
             client = OpenAI()
@@ -578,7 +669,6 @@ def chat_stream():
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                max_output_tokens=120,
                 temperature=temperature,
             ) as stream:
                 for event in stream:

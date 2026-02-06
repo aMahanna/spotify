@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ChevronDown, ChevronUp, GripVertical } from "lucide-react"
+import { buildTourOrder, DEFAULT_TOUR_NODE_COUNT } from "@/lib/graph-tour"
 
 type ChatMessage = {
   role: "user" | "assistant"
@@ -14,15 +15,24 @@ type ChatMessage = {
 
 type GraphChatPanelProps = {
   graphData: any
+  onTourStart?: (tourOrder?: string[]) => void
+  tourSignal?: {
+    type: "step" | "done" | "stop"
+    nodeId?: string
+    index?: number
+    total?: number
+    nonce: number
+  } | null
 }
 
 const FIXED_QUESTIONS = [
   { id: "themes", label: "What are the themes around this playlist?" },
   { id: "collabs", label: "Which artists have worked together that are part of this playlist?" },
   { id: "fun_facts", label: "What is a fun fact about this playlist?" },
+  { id: "tour", label: "Give me a Tour" },
 ]
 
-export function GraphChatPanel({ graphData }: GraphChatPanelProps) {
+export function GraphChatPanel({ graphData, onTourStart, tourSignal }: GraphChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -33,6 +43,10 @@ export function GraphChatPanel({ graphData }: GraphChatPanelProps) {
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
   const dragOffsetRef = useRef<{ x: number; y: number } | null>(null)
+  const tourTextBufferRef = useRef("")
+  const tourLinesRef = useRef<string[]>([])
+  const pendingTourStepsRef = useRef(0)
+  const tourResponseDoneRef = useRef(false)
 
   const LoadingDots = () => (
     <span className="inline-flex items-center gap-0.5">
@@ -126,11 +140,55 @@ export function GraphChatPanel({ graphData }: GraphChatPanelProps) {
     return []
   }
 
+  const appendAssistantDelta = (delta: string) => {
+    setMessages((prev) => {
+      const next = [...prev]
+      const idx = assistantIndexRef.current
+      if (idx !== null && next[idx]) {
+        next[idx] = { ...next[idx], content: next[idx].content + delta }
+      }
+      return next
+    })
+  }
+
+  const flushPendingTourLines = () => {
+    while (pendingTourStepsRef.current > 0 && tourLinesRef.current.length > 0) {
+      const nextLine = tourLinesRef.current.shift()
+      if (nextLine) {
+        appendAssistantDelta(`${nextLine}\n`)
+      }
+      pendingTourStepsRef.current -= 1
+    }
+  }
+
+  const enqueueTourLine = () => {
+    if (tourLinesRef.current.length > 0) {
+      const nextLine = tourLinesRef.current.shift()
+      if (nextLine) {
+        appendAssistantDelta(`${nextLine}\n`)
+        return
+      }
+    }
+    pendingTourStepsRef.current += 1
+  }
+
+  const ingestTourText = (delta: string) => {
+    tourTextBufferRef.current += delta
+    const parts = tourTextBufferRef.current.split("\n")
+    tourTextBufferRef.current = parts.pop() || ""
+    const cleaned = parts.map((line) => line.trim()).filter(Boolean)
+    if (cleaned.length > 0) {
+      tourLinesRef.current.push(...cleaned)
+      flushPendingTourLines()
+    }
+  }
+
   const handleSend = async (questionId: string, questionLabel: string) => {
     if (!questionId || isStreaming) return
 
     setError(null)
     setIsStreaming(true)
+    const isTour = questionId === "tour"
 
     setMessages((prev) => {
       const next = [...prev, { role: "user", content: questionLabel }, { role: "assistant", content: "" }]
@@ -139,6 +197,22 @@ export function GraphChatPanel({ graphData }: GraphChatPanelProps) {
     })
 
     try {
+      const tourOrder =
+        isTour ? buildTourOrder(graphData, DEFAULT_TOUR_NODE_COUNT) : undefined
+      if (isTour) {
+        tourTextBufferRef.current = ""
+        tourLinesRef.current = []
+        pendingTourStepsRef.current = 0
+        tourResponseDoneRef.current = false
+        if (onTourStart) {
+          onTourStart(tourOrder)
+        } else {
+          window.postMessage(
+            { type: "graph-tour-start", tourOrder },
+            window.location.origin
+          )
+        }
+      }
       const edgesPayload = buildEdgesPayload()
       const response = await fetch("http://localhost:5000/api/chat/stream", {
         method: "POST",
@@ -148,6 +222,7 @@ export function GraphChatPanel({ graphData }: GraphChatPanelProps) {
           nodes: graphData?.nodes || [],
           edges: edgesPayload,
           triples: graphData?.triples || [],
+          tour_order: tourOrder,
         }),
       })
 
@@ -188,14 +263,11 @@ export function GraphChatPanel({ graphData }: GraphChatPanelProps) {
           }
           if (parsed.delta) {
             const delta = parsed.delta
-            setMessages((prev) => {
-              const next = [...prev]
-              const idx = assistantIndexRef.current
-              if (idx !== null && next[idx]) {
-                next[idx] = { ...next[idx], content: next[idx].content + delta }
-              }
-              return next
-            })
+            if (isTour) {
+              ingestTourText(delta)
+            } else {
+              appendAssistantDelta(delta)
+            }
           }
           if (parsed.done) {
             doneStreaming = true
@@ -206,9 +278,31 @@ export function GraphChatPanel({ graphData }: GraphChatPanelProps) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to stream response")
     } finally {
-      setIsStreaming(false)
+      if (isTour) {
+        tourResponseDoneRef.current = true
+        flushPendingTourLines()
+      } else {
+        setIsStreaming(false)
+      }
     }
   }
+
+  useEffect(() => {
+    if (!tourSignal) return
+    if (tourSignal.type === "step") {
+      enqueueTourLine()
+      return
+    }
+    if (tourSignal.type === "done") {
+      if (tourResponseDoneRef.current) {
+        setIsStreaming(false)
+      }
+      return
+    }
+    if (tourSignal.type === "stop") {
+      setIsStreaming(false)
+    }
+  }, [tourSignal])
 
   return (
     <div

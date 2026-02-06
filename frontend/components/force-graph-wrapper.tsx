@@ -75,6 +75,8 @@ interface ForceGraphWrapperProps {
   highlightedNodes?: string[]
   selectedNodeId?: string | null
   onNodeSelect?: (node: NodeObject | null) => void
+  focusTransitionMs?: number
+  fitViewSignal?: number
   enableClustering?: boolean
   enableClusterColors?: boolean // Color nodes by cluster assignment
   clusteringMode?: 'local' | 'hybrid' | 'cpu' // Default clustering mode
@@ -343,6 +345,8 @@ export function ForceGraphWrapper({
   highlightedNodes,
   selectedNodeId,
   onNodeSelect,
+  focusTransitionMs = 800,
+  fitViewSignal,
   enableClustering = false, 
   enableClusterColors = false, 
   clusteringMode = 'hybrid', 
@@ -1411,6 +1415,11 @@ export function ForceGraphWrapper({
     zoomToFit();
   };
 
+  useEffect(() => {
+    if (fitViewSignal === undefined) return;
+    zoomToFit();
+  }, [fitViewSignal]);
+
   // Focus camera on a specific node with safety mechanism
   const focusCameraOnNode = (node: any) => {
     if (!node || !graphRef.current) return;
@@ -1419,14 +1428,25 @@ export function ForceGraphWrapper({
     setTimeout(() => {
       if (graphRef.current) {
         try {
-          if (typeof graphRef.current.centerAt === "function") {
-            graphRef.current.centerAt(node.x, node.y, node.z, 800);
-          } else if (typeof graphRef.current.cameraPosition === "function") {
+          const transitionMs = Math.max(300, Number(focusTransitionMs) || 800);
+          if (typeof graphRef.current.cameraPosition === "function") {
             const camera = graphRef.current.camera?.();
-            const currentPos = camera
-              ? { x: camera.position.x, y: camera.position.y, z: camera.position.z }
-              : { x: node.x, y: node.y, z: node.z + 100 };
-            graphRef.current.cameraPosition(currentPos, node, 800);
+            const nodePosition = new THREE.Vector3(node.x || 0, node.y || 0, node.z || 0);
+            let newPos = nodePosition.clone().add(new THREE.Vector3(0, 0, 1).multiplyScalar(180));
+
+            if (camera && camera.position) {
+              const currentPos = new THREE.Vector3(camera.position.x, camera.position.y, camera.position.z);
+              const direction = currentPos.clone().sub(nodePosition);
+              if (direction.length() < 1) {
+                direction.set(1, 1, 1);
+              }
+              const distance = Math.min(520, Math.max(180, direction.length()));
+              newPos = nodePosition.clone().add(direction.normalize().multiplyScalar(distance));
+            }
+
+            graphRef.current.cameraPosition(newPos, nodePosition, transitionMs);
+          } else if (typeof graphRef.current.centerAt === "function") {
+            graphRef.current.centerAt(node.x, node.y, node.z, transitionMs);
           } else {
             console.warn("Graph focus API unavailable on current renderer");
           }
