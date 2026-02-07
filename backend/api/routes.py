@@ -49,12 +49,9 @@ KNOWN_NODE_TYPES = {
     graph_schema.PLAYLISTS_COLLECTION,
     graph_schema.GENRES_COLLECTION,
     graph_schema.LOCATIONS_COLLECTION,
-    graph_schema.SONGWRITERS_COLLECTION,
-    graph_schema.PRODUCERS_COLLECTION,
     graph_schema.MOODS_COLLECTION,
     graph_schema.INSTRUMENTS_COLLECTION,
     graph_schema.LANGUAGES_COLLECTION,
-    graph_schema.CONTRIBUTORS_COLLECTION,
 }
 KNOWN_EDGE_TYPES = {
     graph_schema.ARTISTS_SONGS,

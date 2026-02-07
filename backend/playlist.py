@@ -119,12 +119,12 @@ def _ensure_graph(db, graph_name: str, nodes: Dict[str, str], edges: Dict[str, s
         {
             "edge_collection": edges["songs_songwriters"],
             "from_vertex_collections": [nodes["songs"]],
-            "to_vertex_collections": [nodes["songwriters"]],
+            "to_vertex_collections": [nodes["artists"]],
         },
         {
             "edge_collection": edges["songs_producers"],
             "from_vertex_collections": [nodes["songs"]],
-            "to_vertex_collections": [nodes["producers"]],
+            "to_vertex_collections": [nodes["artists"]],
         },
         {
             "edge_collection": edges["songs_features"],
@@ -149,7 +149,7 @@ def _ensure_graph(db, graph_name: str, nodes: Dict[str, str], edges: Dict[str, s
         {
             "edge_collection": edges["songs_contributors"],
             "from_vertex_collections": [nodes["songs"]],
-            "to_vertex_collections": [nodes["contributors"]],
+            "to_vertex_collections": [nodes["artists"]],
         },
     ]
     db.create_graph(
@@ -335,12 +335,9 @@ def enrich_graph(
         nodes_map["record_labels"]: {},
         nodes_map["genres"]: {},
         nodes_map["locations"]: {},
-        nodes_map["songwriters"]: {},
-        nodes_map["producers"]: {},
         nodes_map["moods"]: {},
         nodes_map["instruments"]: {},
         nodes_map["languages"]: {},
-        nodes_map["contributors"]: {},
     }
     enrichment_edges = [
         edges_map["artists_genres"],
@@ -356,6 +353,21 @@ def enrich_graph(
         edges_map["songs_contributors"],
     ]
     edges_by_collection: Dict[str, List[Dict]] = {name: [] for name in enrichment_edges}
+
+    artist_name_lookup: Dict[str, str] = {}
+
+    def _remember_artist(name: str) -> None:
+        normalized = normalization.normalize_name_lower(name)
+        if normalized and normalized not in artist_name_lookup:
+            artist_name_lookup[normalized] = name
+
+    def _upsert_artist_by_name(raw_name: str) -> Tuple[str, str]:
+        normalized = normalization.normalize_name_lower(raw_name)
+        canonical = artist_name_lookup.get(normalized) or raw_name
+        artist_key = _farmhash_key("artist", canonical)
+        artist_id = upsert_node(nodes_map["artists"], artist_key, {"name": canonical})
+        _remember_artist(canonical)
+        return artist_id, canonical
 
     def upsert_node(collection: str, key: str, payload: Dict) -> str:
         node_id = f"{collection}/{key}"
@@ -547,6 +559,7 @@ def enrich_graph(
                         continue
                     act_key = _farmhash_key("artist", playlist_act)
                     act_id = upsert_node(nodes_map["artists"], act_key, {"name": playlist_act})
+                    _remember_artist(playlist_act)
                     add_edge(
                         edges_map["artists_associated_acts"],
                         artist_id,
@@ -582,8 +595,7 @@ def enrich_graph(
                 song_enrichment_cache[song_cache_key] = song_enrichment
 
             for writer in song_enrichment.get("songwriters", []):
-                writer_key = _farmhash_key("songwriter", writer)
-                writer_id = upsert_node(nodes_map["songwriters"], writer_key, {"name": writer})
+                writer_id, _ = _upsert_artist_by_name(writer)
                 add_edge(
                     edges_map["songs_songwriters"],
                     song_id,
@@ -593,8 +605,7 @@ def enrich_graph(
                 )
 
             for producer in song_enrichment.get("producers", []):
-                producer_key = _farmhash_key("producer", producer)
-                producer_id = upsert_node(nodes_map["producers"], producer_key, {"name": producer})
+                producer_id, _ = _upsert_artist_by_name(producer)
                 add_edge(
                     edges_map["songs_producers"],
                     song_id,
@@ -609,6 +620,7 @@ def enrich_graph(
                     continue
                 feature_key = _farmhash_key("artist", playlist_feature)
                 feature_id = upsert_node(nodes_map["artists"], feature_key, {"name": playlist_feature})
+                _remember_artist(playlist_feature)
                 add_edge(
                     edges_map["songs_features"],
                     song_id,
@@ -656,12 +668,7 @@ def enrich_graph(
                 contributor_role = contributor.get("role", "contributor")
                 if not contributor_name or not contributor_role:
                     continue
-                contributor_key = _farmhash_key("contributor", contributor_name)
-                contributor_id = upsert_node(
-                    nodes_map["contributors"],
-                    contributor_key,
-                    {"name": contributor_name},
-                )
+                contributor_id, _ = _upsert_artist_by_name(contributor_name)
                 add_edge(
                     edges_map["songs_contributors"],
                     song_id,

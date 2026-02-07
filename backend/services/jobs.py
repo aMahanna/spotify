@@ -17,8 +17,14 @@ def utc_now() -> str:
 
 
 def ensure_jobs_collection(db) -> None:
-    if not db.has_collection(settings.GRAPH_JOBS_COLLECTION):
+    if db.has_collection(settings.GRAPH_JOBS_COLLECTION):
+        return
+    try:
         db.create_collection(settings.GRAPH_JOBS_COLLECTION)
+    except Exception as exc:  # Arango raises CollectionCreateError on race
+        if db.has_collection(settings.GRAPH_JOBS_COLLECTION):
+            return
+        raise exc
 
 
 def build_job(db, playlist_url: str) -> dict:

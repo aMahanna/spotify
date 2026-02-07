@@ -50,7 +50,7 @@ pip install -q -r requirements.txt
 free_port 5000
 
 echo "Starting backend on http://localhost:5000..."
-python main.py &
+PYTHONUNBUFFERED=1 python main.py &
 BACKEND_PID=$!
 
 cd ..

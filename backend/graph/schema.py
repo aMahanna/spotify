@@ -14,12 +14,9 @@ LABELS_COLLECTION = "record_labels"
 PLAYLISTS_COLLECTION = "playlists"
 GENRES_COLLECTION = "genres"
 LOCATIONS_COLLECTION = "locations"
-SONGWRITERS_COLLECTION = "songwriters"
-PRODUCERS_COLLECTION = "producers"
 MOODS_COLLECTION = "moods"
 INSTRUMENTS_COLLECTION = "instruments"
 LANGUAGES_COLLECTION = "languages"
-CONTRIBUTORS_COLLECTION = "contributors"
 
 # Edge collections (snake_case)
 ARTISTS_SONGS = "artists_songs"
@@ -57,12 +54,9 @@ def collection_map(graph_id: str) -> Dict[str, Dict[str, str]]:
         "playlists": f"{prefix}_{PLAYLISTS_COLLECTION}",
         "genres": f"{prefix}_{GENRES_COLLECTION}",
         "locations": f"{prefix}_{LOCATIONS_COLLECTION}",
-        "songwriters": f"{prefix}_{SONGWRITERS_COLLECTION}",
-        "producers": f"{prefix}_{PRODUCERS_COLLECTION}",
         "moods": f"{prefix}_{MOODS_COLLECTION}",
         "instruments": f"{prefix}_{INSTRUMENTS_COLLECTION}",
         "languages": f"{prefix}_{LANGUAGES_COLLECTION}",
-        "contributors": f"{prefix}_{CONTRIBUTORS_COLLECTION}",
     }
     edges = {
         "artists_songs": f"{prefix}_{ARTISTS_SONGS}",
