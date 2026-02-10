@@ -20,6 +20,7 @@ import React, { useEffect, useRef, useState, useCallback } from "react"
 import type { Triple } from "@/utils/text-processing"
 import { Maximize2, Minimize2, Pause, Play, RefreshCw, ZoomIn, X, LayoutGrid } from "lucide-react"
 import { WebGPUClusteringEngine } from "@/utils/webgpu-clustering"
+import { getEdgeColor, getNodeColor } from "@/lib/collection-colors"
 import * as d3 from 'd3'
 import * as THREE from 'three'
 
@@ -72,6 +73,11 @@ interface ForceGraphWrapperProps {
   fullscreen?: boolean
   layoutType?: string
   highlightedNodes?: string[]
+  selectedNodeId?: string | null
+  onNodeSelect?: (node: NodeObject | null) => void
+  onSelectionChange?: (selection: { nodes: any[]; edges: any[] }) => void
+  focusTransitionMs?: number
+  fitViewSignal?: number
   enableClustering?: boolean
   enableClusterColors?: boolean // Color nodes by cluster assignment
   clusteringMode?: 'local' | 'hybrid' | 'cpu' // Default clustering mode
@@ -337,7 +343,12 @@ export function ForceGraphWrapper({
   jsonData, 
   fullscreen = false, 
   layoutType, 
-  highlightedNodes, 
+  highlightedNodes,
+  selectedNodeId,
+  onNodeSelect,
+  onSelectionChange,
+  focusTransitionMs = 800,
+  fitViewSignal,
   enableClustering = false, 
   enableClusterColors = false, 
   clusteringMode = 'hybrid', 
@@ -389,10 +400,23 @@ export function ForceGraphWrapper({
   // Track notifications
   const [notification, setNotification] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null)
   const notificationTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const focusInProgressRef = useRef(false)
   
   // Track highlighted nodes for visual emphasis
   const [internalHighlightedNodes, setInternalHighlightedNodes] = useState<Set<string>>(new Set())
   const [highlightLinks, setHighlightLinks] = useState<Set<string>>(new Set())
+
+  // Box selection state
+  const [isBoxSelecting, setIsBoxSelecting] = useState(false)
+  const [boxStart, setBoxStart] = useState<{ x: number; y: number } | null>(null)
+  const [boxEnd, setBoxEnd] = useState<{ x: number; y: number } | null>(null)
+  const [boxSelectedNodeIds, setBoxSelectedNodeIds] = useState<Set<string>>(new Set())
+  const [boxSelectedEdgeIds, setBoxSelectedEdgeIds] = useState<Set<string>>(new Set())
+  const boxSelectionRef = useRef<{ start: { x: number; y: number } | null; end: { x: number; y: number } | null }>({
+    start: null,
+    end: null,
+  })
+  const spacePressedRef = useRef(false)
   
   // Track graph data statistics
   const [graphStats, setGraphStats] = useState<{nodes: number, links: number}>({nodes: 0, links: 0})
@@ -470,6 +494,20 @@ export function ForceGraphWrapper({
       if (endpoint.__threeObj?.userData?.id) return endpoint.__threeObj.userData.id;
       return String(endpoint);
     };
+    const getLinkEndpointName = (endpoint: any, fallbackId: string): string => {
+      if (!endpoint) return fallbackId;
+      if (typeof endpoint === 'object') {
+        return (
+          endpoint.name ||
+          endpoint.label ||
+          endpoint.id ||
+          endpoint._id ||
+          fallbackId
+        );
+      }
+      const byId = graphData?.nodes?.find((node: any) => getNodeId(node) === endpoint || node._id === endpoint || node.id === endpoint);
+      return byId?.name || byId?.label || byId?.id || byId?._id || fallbackId;
+    };
 
     const sourceId = getLinkEndpointId(link.source);
     const targetId = getLinkEndpointId(link.target);
@@ -477,13 +515,15 @@ export function ForceGraphWrapper({
 
     const sourceNode = graphData?.nodes?.find((node: any) => getNodeId(node) === sourceId);
     const targetNode = graphData?.nodes?.find((node: any) => getNodeId(node) === targetId);
+    const sourceName = sourceNode?.name || getLinkEndpointName(link.source, sourceId);
+    const targetName = targetNode?.name || getLinkEndpointName(link.target, targetId);
 
     return {
       label,
       sourceId,
       targetId,
-      sourceName: sourceNode?.name || sourceId,
-      targetName: targetNode?.name || targetId
+      sourceName,
+      targetName
     };
   };
   
@@ -548,6 +588,183 @@ export function ForceGraphWrapper({
     };
   }, [isInitialized]);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.code === "Space") {
+        const target = event.target as HTMLElement | null;
+        const isEditable =
+          target?.isContentEditable ||
+          target?.tagName === "INPUT" ||
+          target?.tagName === "TEXTAREA" ||
+          target?.tagName === "SELECT";
+        if (!isEditable) {
+          event.preventDefault();
+        }
+        spacePressedRef.current = true;
+      }
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code === "Space") {
+        spacePressedRef.current = false;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      spacePressedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    boxSelectionRef.current.start = boxStart;
+    boxSelectionRef.current.end = boxEnd;
+  }, [boxStart, boxEnd]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const container = containerRef.current;
+    const getRelativePoint = (event: PointerEvent) => {
+      const rect = container.getBoundingClientRect();
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+        rect,
+      };
+    };
+
+    const computeSelection = (start: { x: number; y: number }, end: { x: number; y: number }, rect: DOMRect) => {
+      if (!graphData || !graphRef.current) return;
+
+      const camera = graphRef.current.camera?.();
+      if (!camera) return;
+
+      const minX = Math.min(start.x, end.x);
+      const maxX = Math.max(start.x, end.x);
+      const minY = Math.min(start.y, end.y);
+      const maxY = Math.max(start.y, end.y);
+
+      const nextSelectedNodes: any[] = [];
+      const nextSelectedNodeIds = new Set<string>();
+
+      (graphData.nodes || []).forEach((node: any) => {
+        const nodeId = getNodeIdValue(node);
+        if (!nodeId) return;
+        const vector = new THREE.Vector3(node.x || 0, node.y || 0, node.z || 0);
+        vector.project(camera);
+        if (vector.z < -1 || vector.z > 1) return;
+        const screenX = ((vector.x + 1) / 2) * rect.width;
+        const screenY = ((1 - vector.y) / 2) * rect.height;
+        if (screenX >= minX && screenX <= maxX && screenY >= minY && screenY <= maxY) {
+          nextSelectedNodeIds.add(nodeId);
+          nextSelectedNodes.push(node);
+        }
+      });
+
+      const links = Array.isArray(graphData?.links)
+        ? graphData.links
+        : Array.isArray(graphData?.edges)
+          ? graphData.edges
+          : [];
+
+      const nextSelectedEdges: any[] = [];
+      const nextSelectedEdgeIds = new Set<string>();
+
+      links.forEach((link: any) => {
+        const sourceId = getNodeIdValue(link.source ?? link._from);
+        const targetId = getNodeIdValue(link.target ?? link._to);
+        const isSelected =
+          (sourceId && nextSelectedNodeIds.has(sourceId)) ||
+          (targetId && nextSelectedNodeIds.has(targetId));
+        if (!isSelected) return;
+        const linkId = getLinkIdValue({
+          ...link,
+          source: sourceId,
+          target: targetId,
+        });
+        nextSelectedEdgeIds.add(linkId);
+        nextSelectedEdges.push(link);
+      });
+
+      setBoxSelectedNodeIds(nextSelectedNodeIds);
+      setBoxSelectedEdgeIds(nextSelectedEdgeIds);
+      onSelectionChange?.({ nodes: nextSelectedNodes, edges: nextSelectedEdges });
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || !spacePressedRef.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const { x, y } = getRelativePoint(event);
+      setIsBoxSelecting(true);
+      setBoxStart({ x, y });
+      setBoxEnd({ x, y });
+      setSelectedNode(null);
+      setSelectedLink(null);
+      setNodeConnections([]);
+      onNodeSelect?.(null);
+      const controls = graphRef.current?.controls?.();
+      if (controls) {
+        controls.enabled = false;
+      }
+      if (container.setPointerCapture) {
+        try {
+          container.setPointerCapture(event.pointerId);
+        } catch {
+          // Ignore pointer capture errors for non-capturable events.
+        }
+      }
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!isBoxSelecting || !boxSelectionRef.current.start) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const { x, y } = getRelativePoint(event);
+      setBoxEnd({ x, y });
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      if (!isBoxSelecting || !boxSelectionRef.current.start) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const { x, y, rect } = getRelativePoint(event);
+      const start = boxSelectionRef.current.start;
+      const end = { x, y };
+      computeSelection(start, end, rect);
+      setIsBoxSelecting(false);
+      setBoxStart(null);
+      setBoxEnd(null);
+      const controls = graphRef.current?.controls?.();
+      if (controls) {
+        controls.enabled = true;
+      }
+      if (container.releasePointerCapture) {
+        try {
+          container.releasePointerCapture(event.pointerId);
+        } catch {
+          // Ignore pointer capture errors if none was set.
+        }
+      }
+      resetOrbitControlsState();
+    };
+
+    container.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+
+    return () => {
+      container.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [graphData, isBoxSelecting, onNodeSelect, onSelectionChange]);
+
   // Toggle interaction mode
   const toggleInteractionMode = () => {
     const newMode = interactionMode === 'navigation' ? 'selection' : 'navigation';
@@ -598,6 +815,39 @@ export function ForceGraphWrapper({
     
     console.log(`  → Normalized to: "${normalized}"`);
     return normalized;
+  };
+
+  // Normalize a node or id to a stable string id
+  const getNodeIdValue = (nodeObj: any): string => {
+    if (nodeObj === null || nodeObj === undefined) return '';
+    if (typeof nodeObj === 'string' || typeof nodeObj === 'number') return String(nodeObj);
+    if (nodeObj.id !== undefined && nodeObj.id !== null) return String(nodeObj.id);
+    if (nodeObj._id !== undefined && nodeObj._id !== null) return String(nodeObj._id);
+    if (nodeObj.__threeObj?.userData?.id !== undefined && nodeObj.__threeObj?.userData?.id !== null) {
+      return String(nodeObj.__threeObj.userData.id);
+    }
+    if (nodeObj.name !== undefined && nodeObj.name !== null) return String(nodeObj.name);
+    if (nodeObj.label !== undefined && nodeObj.label !== null) return String(nodeObj.label);
+    return '';
+  };
+
+  const getLinkIdValue = (link: any): string => {
+    if (link?.id !== undefined && link?.id !== null) return String(link.id);
+    if (link?._id !== undefined && link?._id !== null) return String(link._id);
+    const sourceId = getNodeIdValue(link?.source ?? link?._from);
+    const targetId = getNodeIdValue(link?.target ?? link?._to);
+    return `${sourceId}-${targetId}`;
+  };
+
+  const resetOrbitControlsState = () => {
+    const controls = graphRef.current?.controls?.();
+    if (!controls) return;
+    if (typeof (controls as any).state === "number") {
+      (controls as any).state = -1;
+    }
+    if (typeof controls.update === "function") {
+      controls.update();
+    }
   };
 
   // Debug node connections with additional logging
@@ -732,6 +982,26 @@ export function ForceGraphWrapper({
     return text.replace(/['"()]/g, '').trim();
   };
 
+  const normalizeGroupLabel = (value: any): string | null => {
+    if (typeof value !== "string") return null;
+    if (value.startsWith("g_") && value.includes("_")) {
+      const suffix = value.slice(value.lastIndexOf("_") + 1);
+      return suffix || "default";
+    }
+    return value || null;
+  };
+
+  const inferNodeGroup = (node: any): string => {
+    const rawId = node?._id || node?.id || "";
+    if (typeof rawId === "string" && rawId.includes("/")) {
+      return rawId.split("/")[0] || "default";
+    }
+    if (typeof rawId === "string" && rawId.startsWith("g_") && rawId.includes("_")) {
+      return rawId.slice(rawId.lastIndexOf("_") + 1) || "default";
+    }
+    return "default";
+  };
+
   // Process the JSON data into the format needed for the graph
   const processGraphData = async (data: any, applyClusteringFirst: boolean = false) => {
     console.log("processGraphData called with input:", {
@@ -796,21 +1066,38 @@ export function ForceGraphWrapper({
 
     // Return processed data with normalized node names and IDs
     const processed = {
-      nodes: data.nodes.map((node: any) => ({
-        ...node,
-        // Ensure node has all required properties and normalize the ID and name
-        id: normalizeText(node.id) || `node-${Math.random().toString(36).substring(2, 9)}`,
-        name: normalizeText(node.name || node.id) || "Unnamed",
-        group: node.group || "default"
-      })),
-      links: data.links.map((link: any) => ({
-        ...link,
-        // Ensure link has all required properties
-        id: link.id || `link-${Math.random().toString(36).substring(2, 9)}`,
-        name: link.name || "related",
-        source: link.source,
-        target: link.target
-      }))
+      nodes: data.nodes.map((node: any) => {
+        const rawId = node.id || node._id || node.name
+        const normalizedId = normalizeText(rawId) || `node-${Math.random().toString(36).substring(2, 9)}`
+        const normalizedName = normalizeText(node.name || node.label || rawId) || "Unnamed"
+        const normalizedNode = {
+          ...node,
+          // Ensure node has all required properties and normalize the ID and name
+          id: normalizedId,
+          name: normalizedName,
+          group: normalizeGroupLabel(node.group) || normalizeGroupLabel(node.type) || inferNodeGroup(node)
+        }
+        return {
+          ...normalizedNode,
+          color: normalizedNode.color || getNodeColor(normalizedNode)
+        }
+      }),
+      links: data.links.map((link: any) => {
+        const source = link.source || link._from
+        const target = link.target || link._to
+        const normalizedLink = {
+          ...link,
+          // Ensure link has all required properties
+          id: link.id || link._id || `link-${Math.random().toString(36).substring(2, 9)}`,
+          name: link.name || link.label || "related",
+          source,
+          target
+        }
+        return {
+          ...normalizedLink,
+          color: normalizedLink.color || getEdgeColor(normalizedLink)
+        }
+      })
     };
     
     console.log("Processed graph data:", {
@@ -959,13 +1246,12 @@ export function ForceGraphWrapper({
             .nodeRelSize(5)
             .nodeResolution(32) // Higher resolution for smoother nodes
             .nodeOpacity(0.8)
-            .linkOpacity(0.2)
+            .linkOpacity(0.08)
             .linkWidth(2)
             .showNavInfo(false)
             .onBackgroundClick(() => {
-              if (selectedNode) {
-                clearSelection();
-              }
+              clearSelection();
+              resetOrbitControlsState();
             });
 
           // Enable panning in 3D controls
@@ -1007,12 +1293,16 @@ export function ForceGraphWrapper({
             console.log("Node click detected", node);
             setSelectedLink(null);
             handleNodeSelection(node);
+            onNodeSelect?.(node);
+            resetOrbitControlsState();
           });
 
           Graph.onLinkClick((link: any) => {
             setSelectedNode(null);
             setNodeConnections([]);
             setSelectedLink(buildSelectedLinkInfo(link));
+            onNodeSelect?.(null);
+            resetOrbitControlsState();
           });
           
           // Ready for data loading
@@ -1159,10 +1449,17 @@ export function ForceGraphWrapper({
         try {
           console.log("Configuring force physics...");
           const charge = currentGraphRef.d3Force('charge');
-          if (charge) charge.strength(-120);
+          if (charge) {
+            charge.strength(-220).distanceMax(500);
+          }
           
           const link = currentGraphRef.d3Force('link');
-          if (link) link.distance(60);
+          if (link) {
+            link.distance(120).strength(0.2);
+          }
+          
+          const collision = d3.forceCollide((node: any) => (node?.val ?? 4) * 1.4).iterations(2);
+          currentGraphRef.d3Force('collision', collision);
           console.log("Force physics configured");
         } catch (forceError) {
           console.warn("Non-critical error configuring forces:", forceError);
@@ -1262,6 +1559,10 @@ export function ForceGraphWrapper({
     setSelectedNode(null);
     setNodeConnections([]);
     setSelectedLink(null);
+    setBoxSelectedNodeIds(new Set());
+    setBoxSelectedEdgeIds(new Set());
+    onNodeSelect?.(null);
+    onSelectionChange?.({ nodes: [], edges: [] });
     
     // Restore cluster colors if enabled
     if (graphRef.current && enableClusterColors && graphData?.nodes) {
@@ -1297,9 +1598,9 @@ export function ForceGraphWrapper({
       const coloredNodes = assignClusterColors(nodesToUse, true, useSemanticClusters);
       graphRef.current.nodeColor((node: any) => {
         const coloredNode = coloredNodes.find((n: any) => getNodeId(n) === getNodeId(node));
-        return coloredNode?.color || '#76b900';
+        return coloredNode?.color || node.color || getNodeColor(node);
       });
-      graphRef.current.linkColor(() => '#ffffff30');
+      graphRef.current.linkColor((link: any) => link.color || '#ffffff40');
       graphRef.current.linkWidth(() => 2);
       graphRef.current.refresh();
     }
@@ -1328,64 +1629,71 @@ export function ForceGraphWrapper({
     zoomToFit();
   };
 
-  // Focus on a specific node with safety mechanism
+  useEffect(() => {
+    if (fitViewSignal === undefined) return;
+    zoomToFit();
+  }, [fitViewSignal]);
+
+  // Focus camera on a specific node with safety mechanism
+  const focusCameraOnNode = (node: any) => {
+    if (!node || !graphRef.current) return;
+    if (focusInProgressRef.current) return;
+    focusInProgressRef.current = true;
+    setTimeout(() => {
+      if (graphRef.current) {
+        try {
+          const transitionMs = Math.max(300, Number(focusTransitionMs) || 800);
+          if (typeof graphRef.current.cameraPosition === "function") {
+            const camera = graphRef.current.camera?.();
+            const nodePosition = new THREE.Vector3(node.x || 0, node.y || 0, node.z || 0);
+            let newPos = nodePosition.clone().add(new THREE.Vector3(0, 0, 1).multiplyScalar(180));
+
+            if (camera && camera.position) {
+              const currentPos = new THREE.Vector3(camera.position.x, camera.position.y, camera.position.z);
+              const direction = currentPos.clone().sub(nodePosition);
+              if (direction.length() < 1) {
+                direction.set(1, 1, 1);
+              }
+              const distance = Math.min(520, Math.max(180, direction.length()));
+              newPos = nodePosition.clone().add(direction.normalize().multiplyScalar(distance));
+            }
+
+            graphRef.current.cameraPosition(newPos, nodePosition, transitionMs);
+          } else if (typeof graphRef.current.centerAt === "function") {
+            graphRef.current.centerAt(node.x, node.y, node.z, transitionMs);
+          } else {
+            console.warn("Graph focus API unavailable on current renderer");
+          }
+        } catch (err) {
+          console.warn("Error focusing on node:", err);
+        }
+      }
+      focusInProgressRef.current = false;
+    }, 50);
+  };
+
+  // Focus on a specific node by id (selection + camera)
   const focusOnNode = (nodeId: string) => {
     if (!graphData || !graphRef.current) return;
-    
-    const node = graphData.nodes.find((n: any) => n.id === nodeId);
-    if (node) {
-      handleNodeSelection(node);
-      
-      // Use setTimeout to prevent possible recursion
-      setTimeout(() => {
-        if (graphRef.current) {
-          try {
-            // Use centerAt and zoom separately with a delay in between
-            graphRef.current.centerAt(node.x, node.y, node.z, 800);
-            
-            // Add delay before zooming
-            setTimeout(() => {
-              if (graphRef.current) {
-                graphRef.current.zoom(1.5, 800);
-              }
-            }, 100);
-          } catch (err) {
-            console.warn("Error focusing on node:", err);
-          }
-        }
-      }, 50);
+    const node = graphData.nodes.find((n: any) => getNodeIdValue(n) === nodeId) ||
+      graphData.nodes.find((n: any) => (n.name || '').toLowerCase() === nodeId.toLowerCase());
+    if (!node) return;
+    if (selectedNode && getNodeIdValue(selectedNode) === nodeId) {
+      focusCameraOnNode(node);
+      return;
     }
+    handleNodeSelection(node, { skipFocus: true });
+    focusCameraOnNode(node);
   };
 
   // Replace or enhance the handleNodeSelection function
-  const handleNodeSelection = (node: any) => {
-    // Function to reliably extract a node's ID
-    const getNodeId = (nodeObj: any): string => {
-      if (!nodeObj) return '';
-      
-      // If it's a string, return it directly
-      if (typeof nodeObj === 'string') return nodeObj;
-      
-      // If it has an ID property, use that
-      if (nodeObj.id && typeof nodeObj.id === 'string') {
-        return nodeObj.id;
-      }
-      
-      // If it's a ThreeJS object with userData
-      if (nodeObj.__threeObj && nodeObj.__threeObj.userData) {
-        return nodeObj.__threeObj.userData.id || '';
-      }
-      
-      // Fallback
-      return '';
-    };
-    
+  const handleNodeSelection = (node: any, options?: { skipFocus?: boolean }) => {
     // Normalize the node ID
-    const nodeId = getNodeId(node);
+    const nodeId = getNodeIdValue(node);
     const prevSelectedNode = selectedNode;
     
     // Toggle selection state for the node
-    if (selectedNode && getNodeId(selectedNode) === nodeId) {
+    if (selectedNode && getNodeIdValue(selectedNode) === nodeId) {
       // Deselect current node
       setSelectedNode(null);
       setNodeConnections([]);
@@ -1420,7 +1728,7 @@ export function ForceGraphWrapper({
           // Regenerate cluster colors properly
           const coloredNodes = assignClusterColors(nodesToUse, true, useSemanticClusters);
           graphRef.current.nodeColor((node: any) => {
-            const coloredNode = coloredNodes.find((n: any) => getNodeId(n) === getNodeId(node));
+            const coloredNode = coloredNodes.find((n: any) => getNodeIdValue(n) === getNodeIdValue(node));
             return coloredNode?.color || '#76b900';
           });
         } else {
@@ -1435,7 +1743,7 @@ export function ForceGraphWrapper({
           });
         }
         
-        graphRef.current.linkColor(() => '#ffffff30'); // Reset link colors too
+        graphRef.current.linkColor((link: any) => link.color || '#ffffff40'); // Reset link colors too
         graphRef.current.linkWidth(() => 2); // Reset to default width
         graphRef.current.refresh();
       }
@@ -1456,8 +1764,8 @@ export function ForceGraphWrapper({
           const source = typeof link.source === 'object' ? link.source : { id: link.source };
           const target = typeof link.target === 'object' ? link.target : { id: link.target };
           
-          const sourceId = getNodeId(source);
-          const targetId = getNodeId(target);
+          const sourceId = getNodeIdValue(source);
+          const targetId = getNodeIdValue(target);
           
           if (sourceId === nodeId) {
             // Outgoing connection
@@ -1488,19 +1796,20 @@ export function ForceGraphWrapper({
         // Preserve cluster colors when highlighting nodes
         graphRef.current
           .nodeColor((n: any) => {
-            const nId = getNodeId(n);
+            const nId = getNodeIdValue(n);
             if (nId === nodeId) return '#ffcf00'; // Selected node: bright yellow
             if (connectedNodes.has(nId)) return '#ff6200'; // Connected nodes: orange
             
             // Preserve cluster colors if enabled, otherwise use default
             if (enableClusterColors) {
               // Find the original node data to get its cluster color
-              const originalNode = graphData.nodes.find((node: any) => getNodeId(node) === nId);
+              const originalNode = graphData.nodes.find((node: any) => getNodeIdValue(node) === nId);
               if (originalNode && originalNode.color) {
                 return originalNode.color;
               }
             }
-            return '#76b900'; // Default: green
+            const fallbackNode = graphData.nodes.find((node: any) => getNodeId(node) === nId) || n;
+            return getNodeColor(fallbackNode); // Default: collection color
           })
           .linkWidth((link: any) => {
             const sourceId = getNodeId(link.source);
@@ -1520,12 +1829,14 @@ export function ForceGraphWrapper({
             if (sourceId === nodeId || targetId === nodeId) {
               return '#ff9500'; // Orange for connections
             }
-            return '#cccccc'; // Default: light gray
+            return link.color || '#cccccc'; // Default: light gray
           })
           .refresh();
         
-        // Zoom to focus on the selected node
-        focusOnNode(nodeId);
+        // Pan to focus on the selected node (unless skipped)
+        if (!options?.skipFocus) {
+          focusCameraOnNode(node);
+        }
       }
       
     }
@@ -1536,22 +1847,24 @@ export function ForceGraphWrapper({
     try {
       // Use the current hover state from the ref to prevent recursive calls
       const isHovered = hoveredNodeRef.current === node;
-      const isSelected = selectedNode && node.id === selectedNode.id;
-      const isConnected = nodeConnections.some(conn => 
-        conn.target === node.id || conn.source === node.id
-      );
-      
-      if (isSelected) return '#50fa7b'; // Bright green for selected
-      if (isHovered) return '#8be9fd'; // Cyan for hovered
-      if (isConnected) return '#bd93f9'; // Purple for connected nodes
+      const nodeId = getNodeIdValue(node);
+      const selectedId = selectedNode ? getNodeIdValue(selectedNode) : '';
+      const isSelected = Boolean(selectedId) && nodeId === selectedId;
+      const isConnected = nodeConnections.some(conn => {
+        const sourceId = getNodeIdValue(conn.source);
+        const targetId = getNodeIdValue(conn.target);
+        return sourceId === nodeId || targetId === nodeId;
+      });
       
       // Default colors based on group
       const group = node.group || 'default';
-      switch (group) {
-        case 'document': return '#f8f8f2'; // White for documents
-        case 'important': return '#8be9fd'; // Teal for important nodes
-        default: return '#50fa7b'; // Bright green for most nodes
-      }
+      const baseColor = node.color
+        || (group === 'document' ? '#f8f8f2' : group === 'important' ? '#8be9fd' : '#50fa7b');
+
+      if (isSelected) return baseColor;
+      if (isHovered) return '#8be9fd'; // Cyan for hovered
+      if (isConnected) return '#bd93f9'; // Purple for connected nodes
+      return baseColor;
     } catch (error) {
       console.warn('Error in getNodeColor:', error);
       return '#50fa7b'; // Default fallback
@@ -1812,6 +2125,9 @@ export function ForceGraphWrapper({
       // Apply node positions if provided in the data
       if (data && data.nodes && data.nodes.some((node: any) => node.x !== undefined && node.y !== undefined)) {
         graph.graphData(data);
+        graph
+          .nodeColor((node: any) => node.color || getNodeColor(node))
+          .linkColor((link: any) => link.color || '#ffffff40');
         setTimeout(() => {
           graph.zoomToFit(400, 50);
         }, 500);
@@ -1819,15 +2135,23 @@ export function ForceGraphWrapper({
         // Force graph layout with parameters
         graph
           .d3Force('link')
-          .distance((link: any) => 80) // Adjust link distance
-          .strength((link: any) => 0.5); // Adjust link strength
+          .distance((link: any) => 120) // Increase spacing between nodes
+          .strength((link: any) => 0.2); // Looser link tension
         
         graph
           .d3Force('charge')
-          .strength(-120) // Adjust repulsive force
-          .distanceMax(300); // Max distance for repulsive force
+          .strength(-220) // Stronger repulsive force
+          .distanceMax(500); // Expand repulsion range
+        
+        graph.d3Force(
+          'collision',
+          d3.forceCollide((node: any) => (node?.val ?? 4) * 1.4).iterations(2)
+        );
         
         graph.graphData(data);
+        graph
+          .nodeColor((node: any) => node.color || getNodeColor(node))
+          .linkColor((link: any) => link.color || '#ffffff40');
         
         setTimeout(() => {
           graph.zoomToFit(400, 70);
@@ -1984,31 +2308,10 @@ export function ForceGraphWrapper({
     
     console.log("Effect triggered: Updating visual highlighting for selected node and connections");
     
-    // Helper function to extract ID reliably
-    const getNodeId = (nodeObj: any): string => {
-      if (!nodeObj) return '';
-      
-      // If it's a string, return it directly
-      if (typeof nodeObj === 'string') return nodeObj;
-      
-      // If it has an ID property, use that
-      if (nodeObj.id && typeof nodeObj.id === 'string') {
-        return nodeObj.id;
-      }
-      
-      // If it's a ThreeJS object with userData
-      if (nodeObj.__threeObj && nodeObj.__threeObj.userData) {
-        return nodeObj.__threeObj.userData.id || '';
-      }
-      
-      // Fallback
-      return '';
-    };
-    
     // Refresh the graph to update colors and highlighting
     try {
       // Get selected node ID for comparison
-      const selectedNodeId = selectedNode ? getNodeId(selectedNode) : null;
+      const selectedNodeId = selectedNode ? getNodeIdValue(selectedNode) : null;
       console.log("Selected node ID for highlighting:", selectedNodeId);
       
       // If no connections found but we have a selected node and graph data,
@@ -2109,8 +2412,8 @@ export function ForceGraphWrapper({
       
       // Collect all node IDs that are connected to the selected node
       nodeConnections.forEach(conn => {
-        const sourceId = getNodeId(conn.source);
-        const targetId = getNodeId(conn.target);
+        const sourceId = getNodeIdValue(conn.source);
+        const targetId = getNodeIdValue(conn.target);
         
         if (sourceId !== selectedNodeId) {
           connectedNodeIds.add(sourceId);
@@ -2124,27 +2427,26 @@ export function ForceGraphWrapper({
       graphRef.current
         .nodeColor((node: any) => {
           // Get reliable ID for comparison
-          const nodeId = getNodeId(node);
+          const nodeId = getNodeIdValue(node);
           
           const isSelected = selectedNodeId && nodeId === selectedNodeId;
-          const isConnected = selectedNodeId && connectedNodeIds.has(nodeId);
-          
-          if (isSelected) return '#50fa7b'; // Bright green for selected
-          if (isConnected) return '#bd93f9'; // Purple for connected nodes
-          
-          // Default colors based on group
-          const group = node.group || 'default';
-          switch (group) {
-            case 'document': return '#f8f8f2'; // White for documents
-            case 'important': return '#8be9fd'; // Teal for important nodes
-            default: return '#50fa7b'; // Bright green for most nodes
+          const baseColor = node.color || getNodeColor(node);
+
+          if (boxSelectedNodeIds.has(nodeId)) {
+            return '#50fa7b';
           }
+          if (isSelected) return baseColor; // Keep original node color
+          return baseColor;
         })
         .linkColor((link: any) => {
+          const linkId = getLinkIdValue(link);
+          if (boxSelectedEdgeIds.has(linkId)) {
+            return '#ffb86c';
+          }
           // Highlight links connected to selected node
           if (selectedNodeId) {
-            const sourceId = getNodeId(link.source);
-            const targetId = getNodeId(link.target);
+            const sourceId = getNodeIdValue(link.source);
+            const targetId = getNodeIdValue(link.target);
             
             // Check if this link connects to the selected node
             const isDirectConnection = sourceId === selectedNodeId || targetId === selectedNodeId;
@@ -2161,13 +2463,17 @@ export function ForceGraphWrapper({
               return '#bd93f9'; // Purple for connected links
             }
           }
-          return '#ffffff30'; // Default semi-transparent white
+          return link.color || '#ffffff40'; // Default semi-transparent white
         })
         .linkWidth((link: any) => {
+          const linkId = getLinkIdValue(link);
+          if (boxSelectedEdgeIds.has(linkId)) {
+            return 3;
+          }
           // Make selected links thicker
           if (selectedNodeId) {
-            const sourceId = getNodeId(link.source);
-            const targetId = getNodeId(link.target);
+            const sourceId = getNodeIdValue(link.source);
+            const targetId = getNodeIdValue(link.target);
             
             // Check if this link connects to the selected node
             const isDirectConnection = sourceId === selectedNodeId || targetId === selectedNodeId;
@@ -2188,56 +2494,10 @@ export function ForceGraphWrapper({
         })
         // Configure node labels to always show for selected node and its connections
         .nodeThreeObject((node: any) => {
-          const nodeId = getNodeId(node);
+          const nodeId = getNodeIdValue(node);
           const isSelected = selectedNodeId && nodeId === selectedNodeId;
           const isConnected = selectedNodeId && connectedNodeIds.has(nodeId);
-          const camera = graphRef.current.camera();
-          const labelOpacity = Math.max(0.08, getLabelOpacity(node, camera));
-          
           const group = new THREE.Group();
-            
-            // Create a sprite for the label
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-            const text = node.name || node.id;
-            
-            if (context) {
-              // Set canvas size
-              canvas.width = 768;
-              canvas.height = 192;
-              
-              // Draw background
-              const bgAlpha = (isSelected ? 0.85 : 0.65) * labelOpacity;
-              context.fillStyle = `rgba(0, 0, 0, ${bgAlpha})`;
-              context.fillRect(0, 0, canvas.width, canvas.height);
-              
-              // Draw text
-              context.font = isSelected ? 'bold 96px Arial' : '72px Arial';
-              const textAlpha = Math.max(0.15, labelOpacity);
-              context.fillStyle = `rgba(255, 255, 255, ${textAlpha})`;
-              context.textAlign = 'center';
-              context.textBaseline = 'middle';
-              context.fillText(text, canvas.width / 2, canvas.height / 2);
-              
-              // Create texture from canvas
-              const texture = new THREE.CanvasTexture(canvas);
-              texture.needsUpdate = true;
-              
-              // Create sprite material and sprite
-              const spriteMaterial = new THREE.SpriteMaterial({ 
-                map: texture,
-                transparent: true,
-                opacity: labelOpacity
-              });
-              const sprite = new THREE.Sprite(spriteMaterial);
-              
-              // Scale and position the sprite
-              sprite.scale.set(36, 9, 1);
-              sprite.position.set(0, node.val ? node.val + 10 : 16, 0);
-              
-              // Add to group
-              group.add(sprite);
-            }
             
             // Add selection ring only for selected node
             if (isSelected) {
@@ -2253,8 +2513,8 @@ export function ForceGraphWrapper({
           // Only process if we have a selected node
           if (!selectedNodeId) return null;
           
-          const sourceId = getNodeId(link.source);
-          const targetId = getNodeId(link.target);
+          const sourceId = getNodeIdValue(link.source);
+          const targetId = getNodeIdValue(link.target);
           
           // Check if this link connects to the selected node
           const isDirectConnection = sourceId === selectedNodeId || targetId === selectedNodeId;
@@ -2327,7 +2587,7 @@ export function ForceGraphWrapper({
     } catch (error) {
       console.error("Error updating graph visual state:", error);
     }
-  }, [selectedNode, nodeConnections, graphData]);
+  }, [selectedNode, nodeConnections, graphData, boxSelectedNodeIds, boxSelectedEdgeIds]);
 
   // Highlight selected link
   useEffect(() => {
@@ -2349,13 +2609,13 @@ export function ForceGraphWrapper({
 
     graphRef.current
       .linkWidth((link: any) => (isSelectedLink(link) ? 4 : 2))
-      .linkColor((link: any) => (isSelectedLink(link) ? '#00e5ff' : '#ffffff30'))
+      .linkColor((link: any) => (isSelectedLink(link) ? '#00e5ff' : (link.color || '#ffffff40')))
       .nodeColor((node: any) => {
         const nodeId = getNodeId(node);
         if (nodeId === selectedLink.sourceId || nodeId === selectedLink.targetId) {
           return '#00e5ff';
         }
-        return '#76b900';
+        return node.color || getNodeColor(node);
       })
       .refresh();
   }, [selectedLink]);
@@ -2481,11 +2741,6 @@ export function ForceGraphWrapper({
         // Reset to original colors
         graphRef.current.nodeColor((node: any) => node.color || '#4CAF50');
         graphRef.current.refresh();
-        
-        showNotification(
-          "Cluster colors disabled - using original node colors",
-          "info"
-        );
       }
     }
   }, [enableClusterColors, graphData, isClusteringEnabled, clusteringMethod, semanticAlgorithm])
@@ -2617,6 +2872,12 @@ export function ForceGraphWrapper({
       console.log("Initialized highlighted nodes from props:", highlightedNodes);
     }
   }, [highlightedNodes]);
+
+  useEffect(() => {
+    if (!selectedNodeId) return;
+    if (!graphData || !graphRef.current) return;
+    focusOnNode(selectedNodeId);
+  }, [selectedNodeId, graphData, isInitialized]);
   
   // Use effect to apply layout type from props
   useEffect(() => {
@@ -2649,12 +2910,12 @@ export function ForceGraphWrapper({
   const createSelectionRing = (node: any) => {
     // Create a ring to highlight the selected node
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(node.val * 1.2 || 6, node.val * 1.5 || 7.5, 32),
+      new THREE.RingGeometry(node.val * 1.25 || 6.5, node.val * 1.6 || 8, 32),
       new THREE.MeshBasicMaterial({
-        color: 0xffffff,
+        color: node?.color || 0xffffff,
         side: THREE.DoubleSide,
         transparent: true,
-        opacity: 0.8,
+        opacity: 0.9,
       })
     );
     
@@ -2690,10 +2951,10 @@ export function ForceGraphWrapper({
       const distance = nodePosition.distanceTo(cameraPosition);
       
       // Show labels for closer nodes or nodes with many connections
-      const hasHighConnectivity = node.val && node.val > 3;
+      const hasHighConnectivity = node.val && node.val > 5;
       
       // Adjust these thresholds as needed
-      if (distance < 220 || hasHighConnectivity) {
+      if (distance < 140 || hasHighConnectivity) {
         return true;
       }
     }
@@ -2779,15 +3040,16 @@ export function ForceGraphWrapper({
             } else {
               // Reset to default colors
               graphRef.current.nodeColor((node: any) => {
+                if (node.color) return node.color;
                 const group = node.group || 'default';
                 switch (group) {
                   case 'document': return '#f8f8f2';
                   case 'important': return '#8be9fd';
-                  default: return '#76b900';
+                  default: return getNodeColor(node);
                 }
               });
             }
-            graphRef.current.linkColor(() => '#ffffff30');
+            graphRef.current.linkColor((link: any) => link.color || '#ffffff40');
             graphRef.current.linkWidth(() => 1);
             graphRef.current.refresh();
           }
@@ -2907,6 +3169,18 @@ export function ForceGraphWrapper({
         className="w-full h-full"
       ></div>
 
+      {isBoxSelecting && boxStart && boxEnd && (
+        <div
+          className="absolute border border-blue-400 bg-blue-400/10 pointer-events-none"
+          style={{
+            left: Math.min(boxStart.x, boxEnd.x),
+            top: Math.min(boxStart.y, boxEnd.y),
+            width: Math.abs(boxEnd.x - boxStart.x),
+            height: Math.abs(boxEnd.y - boxStart.y),
+          }}
+        />
+      )}
+
       {/* Loading Overlay */}
       {isLoading && (
         <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center z-20">
@@ -2989,21 +3263,23 @@ export function ForceGraphWrapper({
         </button> */}
       </div>
 
-      <button
-        onClick={resetView}
-        className="absolute bottom-4 right-4 z-20 px-3 py-1.5 rounded text-white text-xs shadow bg-gray-700/80 hover:bg-gray-600/90 flex items-center gap-2"
-      >
-        <RefreshCw size={14} />
-        Reset View
-      </button>
-
       {/* Top-Right Info Panel */}
-      <div className="absolute top-4 right-24 z-10 bg-gray-800/80 p-3 rounded text-xs text-gray-300 shadow w-48">
-        <p><span className="font-semibold text-white">Mode:</span> {interactionMode}</p>
+      <div className="absolute top-4 right-4 z-10 bg-gray-800/80 p-3 rounded text-xs text-gray-300 shadow w-48">
+        <div className="flex items-center justify-between gap-2">
+          <p className="font-semibold text-white">Mode: {interactionMode}</p>
+          <button
+            onClick={resetView}
+            className="px-2 py-1 rounded text-white text-[10px] shadow bg-gray-700/80 hover:bg-gray-600/90 flex items-center gap-1"
+          >
+            <RefreshCw size={12} />
+            Reset
+          </button>
+        </div>
         <ul className="list-disc list-inside mt-1 space-y-0.5">
           <li>Drag to rotate view</li>
           <li>Scroll to zoom in/out</li>
           <li>Shift+drag to pan</li>
+          <li>Space+drag to box select</li>
         </ul>
         <p className="mt-2 pt-2 border-t border-gray-600/50"><span className="font-semibold text-white">Nodes:</span> {graphStats.nodes} &bull; <span className="font-semibold text-white">Links:</span> {graphStats.links}</p>
         <p className="mt-1"><span className="font-semibold text-white">WebGPU Clustering:</span> 
@@ -3016,11 +3292,20 @@ export function ForceGraphWrapper({
       {/* Selected Node Panel */}
       {selectedNode && (
         <div className="absolute top-1/2 left-4 -translate-y-1/2 z-10 bg-gray-800/90 p-4 rounded-lg shadow-lg max-w-md text-sm text-gray-200 w-1/3">
-          <div className="flex justify-between items-center mb-3">
+          <div className="flex justify-between items-center mb-1">
             <h4 className="font-bold text-base text-white break-all">Selected: {selectedNode.name || selectedNode.id}</h4>
             <button onClick={clearSelection} className="text-gray-400 hover:text-white">
               <X size={18} />
             </button>
+          </div>
+          <div className="text-xs text-gray-400 mb-3">
+            Type:{" "}
+            <span className="text-gray-200">
+              {normalizeGroupLabel(selectedNode.group) ||
+                normalizeGroupLabel((selectedNode as any).type) ||
+                inferNodeGroup(selectedNode) ||
+                "unknown"}
+            </span>
           </div>
           <div className="max-h-48 overflow-y-auto text-xs pr-2">
             {nodeConnections.length > 0 ? (
@@ -3052,16 +3337,12 @@ export function ForceGraphWrapper({
       {selectedLink && (
         <div className="absolute top-1/2 right-4 -translate-y-1/2 z-10 bg-gray-800/90 p-4 rounded-lg shadow-lg max-w-md text-sm text-gray-200 w-1/3">
           <div className="flex justify-between items-center mb-3">
-            <h4 className="font-bold text-base text-white break-all">Selected Link</h4>
+            <h4 className="font-bold text-base text-white break-all">Selected: {selectedLink.label}</h4>
             <button onClick={() => setSelectedLink(null)} className="text-gray-400 hover:text-white">
               <X size={18} />
             </button>
           </div>
           <div className="text-xs space-y-2">
-            <div>
-              <span className="font-semibold text-gray-300">Label:</span>{" "}
-              <span className="text-white">{selectedLink.label}</span>
-            </div>
             <div>
               <span className="font-semibold text-gray-300">Source:</span>{" "}
               <span className="text-white">{selectedLink.sourceName}</span>

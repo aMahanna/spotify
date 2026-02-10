@@ -20,7 +20,8 @@ import type React from "react"
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import type { NodeDocument, EdgeDocument } from "@/types/graph"
-import { Maximize2, Minimize2, ZoomIn, ZoomOut, Move, Filter, Play, Pause } from "lucide-react"
+import { getEdgeColor, getNodeColor } from "@/lib/collection-colors"
+import { Maximize2, Minimize2, ZoomIn, ZoomOut, Move } from "lucide-react"
 
 interface FallbackGraphProps {
   nodes: NodeDocument[]
@@ -45,6 +46,7 @@ interface Link {
   source: string
   target: string
   label: string
+  color?: string
 }
 
 // Add interface for CPU-based grid cell
@@ -54,7 +56,12 @@ interface GridCell {
   nodeIndices: number[];
 }
 
-export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNodes }: FallbackGraphProps) {
+export function FallbackGraph({
+  nodes,
+  edges,
+  fullscreen = false,
+  highlightedNodes,
+}: FallbackGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(fullscreen)
@@ -77,8 +84,6 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
   const [tooltipText, setTooltipText] = useState("")
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 })
   const [showTooltip, setShowTooltip] = useState(false)
-  const [simulationPaused, setSimulationPaused] = useState(true) // Start with simulation paused
-
   // Add state for CPU-based clustering
   const [cpuClustering, setCpuClustering] = useState<boolean>(false);
   const [gridCells, setGridCells] = useState<Map<string, GridCell>>(new Map());
@@ -134,8 +139,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
     setOffset({ x: 0, y: 0 })
     setSelectedNodeId(null)
 
-    // Restart simulation
-    setSimulation((prev) => (prev ? { ...prev, isRunning: true, iteration: 0 } : null))
+    setSimulation((prev) => (prev ? { ...prev, iteration: 0 } : null))
   }, [])
 
   const handleIncreaseNodeLimit = useCallback(() => {
@@ -144,10 +148,6 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
 
   const handleDecreaseNodeLimit = useCallback(() => {
     setNodeLimit((prev) => Math.max(25, prev - 25))
-  }, [])
-
-  const toggleNodeLimit = useCallback(() => {
-    setNodeLimit((prev) => (prev === 75 ? 150 : 75))
   }, [])
 
   // Handle tooltip display
@@ -251,7 +251,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
         vx: 0,
         vy: 0,
         radius: Math.max(5, Math.min(12, 5 + connectionCount * 0.5)),
-        color: isHighlighted ? "#FF9900" : "#76B900",
+        color: isHighlighted ? "#FF9900" : getNodeColor(nodeDoc || { _id: id }),
         connections: connectionCount,
       }
     })
@@ -263,18 +263,19 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
         source: edge._from,
         target: edge._to,
         label: edge.label,
+        color: getEdgeColor(edge),
       }))
 
     setSimulation({
       nodes: simulationNodes,
       links,
-      isRunning: !simulationPaused, // Use the simulationPaused state to determine initial running state
+      isRunning: false,
       iteration: 0,
     })
     
     // Apply CPU clustering after setting up the simulation
     applyCpuClustering(simulationNodes);
-  }, [nodes, edges, nodeLimit, simulationPaused, highlightedNodes])
+  }, [nodes, edges, nodeLimit, highlightedNodes])
 
   // Run the simulation with optimizations
   useEffect(() => {
@@ -463,7 +464,9 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
         ctx.beginPath()
         ctx.moveTo(x1, y1)
         ctx.lineTo(x2, y2)
-        ctx.strokeStyle = isHighlightedLink ? 'rgba(255, 153, 0, 0.8)' : "rgba(150, 150, 150, 0.3)"
+        ctx.strokeStyle = isHighlightedLink
+          ? "rgba(255, 153, 0, 0.8)"
+          : (link.color || "rgba(150, 150, 150, 0.6)")
         ctx.stroke()
         
         // Draw directional arrow
@@ -494,7 +497,9 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
         )
         ctx.closePath()
         
-        ctx.fillStyle = isHighlightedLink ? 'rgba(255, 153, 0, 0.8)' : "rgba(150, 150, 150, 0.5)"
+        ctx.fillStyle = isHighlightedLink
+          ? "rgba(255, 153, 0, 0.8)"
+          : (link.color || "rgba(150, 150, 150, 0.5)")
         ctx.fill()
         
         // Draw link label if hovered/selected or zoom is high enough
@@ -527,8 +532,8 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
           ctx.fill()
           
           // Draw label text
-          ctx.fillStyle = isHighlightedLink ? "#FFF" : "rgba(255, 255, 255, 0.9)"
-          ctx.font = `${12 / zoom}px sans-serif`
+          ctx.fillStyle = "#FFFFFF"
+          ctx.font = `${13 / zoom}px sans-serif`
           ctx.textAlign = "center"
           ctx.textBaseline = "middle"
           ctx.fillText(labelText, labelX, labelY - textHeight / 2)
@@ -574,7 +579,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
         // Draw node label if hovered, selected, or zoom is high enough
         if (isHovered || isSelected || zoom > 1.2 || isHighlighted) {
           const labelText = String(node.label)
-          const fontSize = isHighlighted || isSelected ? 14 / zoom : 12 / zoom
+          const fontSize = isHighlighted || isSelected ? 16 / zoom : 14 / zoom
           ctx.font = `${fontSize}px sans-serif`
           ctx.textAlign = "center"
           ctx.textBaseline = "middle"
@@ -584,8 +589,8 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
           const textHeight = 20 / zoom
           
           ctx.fillStyle = isHighlighted 
-            ? "rgba(255, 153, 0, 0.8)" 
-            : (isSelected ? "rgba(0, 128, 255, 0.8)" : "rgba(0, 0, 0, 0.7)")
+            ? "rgba(255, 153, 0, 0.75)" 
+            : (isSelected ? "rgba(0, 128, 255, 0.75)" : "rgba(0, 0, 0, 0.55)")
           ctx.beginPath()
           ctx.roundRect(
             x - textWidth / 2,
@@ -597,7 +602,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
           ctx.fill()
           
           // Draw text
-          ctx.fillStyle = "rgba(255, 255, 255, 0.95)"
+          ctx.fillStyle = "#FFFFFF"
           ctx.fillText(labelText, x, y + radius + 4 / zoom + textHeight / 2)
         }
       })
@@ -783,17 +788,19 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
             const tx = centerX + (targetNode.x + offset.x) * zoom
             const ty = centerY + (targetNode.y + offset.y) * zoom
 
-            // Highlight links connected to selected node
-            if (
+            const isHighlighted =
               hoveredNode === sourceNode.id ||
               hoveredNode === targetNode.id ||
               selectedNodeId === sourceNode.id ||
               selectedNodeId === targetNode.id
-            ) {
+            const defaultLinkColor = link.color || "rgba(255, 255, 255, 0.5)"
+
+            // Highlight links connected to selected node
+            if (isHighlighted) {
               ctx.strokeStyle = "rgba(118, 185, 0, 0.6)"
               ctx.lineWidth = 2
             } else {
-              ctx.strokeStyle = "rgba(255, 255, 255, 0.2)"
+              ctx.strokeStyle = defaultLinkColor
               ctx.lineWidth = 1
             }
 
@@ -817,7 +824,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
               ty - arrowLength * Math.sin(angle + Math.PI / 6),
             )
             ctx.closePath()
-            ctx.fillStyle = "rgba(118, 185, 0, 0.6)"
+            ctx.fillStyle = isHighlighted ? "rgba(118, 185, 0, 0.6)" : (link.color || "rgba(118, 185, 0, 0.6)")
             ctx.fill()
 
             // Draw link label for selected connections
@@ -831,13 +838,13 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
               const midY = (sy + ty) / 2
 
               // Background for label
-              ctx.font = "10px Inter, sans-serif"
+              ctx.font = "12px Inter, sans-serif"
               const labelWidth = ctx.measureText(link.label).width + 8
-              ctx.fillStyle = "rgba(0, 0, 0, 0.7)"
+              ctx.fillStyle = "rgba(0, 0, 0, 0.55)"
               ctx.fillRect(midX - labelWidth / 2, midY - 10, labelWidth, 20)
 
               // Label text
-              ctx.fillStyle = "white"
+              ctx.fillStyle = "#FFFFFF"
               ctx.textAlign = "center"
               ctx.textBaseline = "middle"
               ctx.fillText(link.label, midX, midY)
@@ -861,7 +868,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
             // Glow effect
             ctx.fillStyle = "#76B900"
           } else {
-            ctx.fillStyle = "rgba(118, 185, 0, 0.8)"
+            ctx.fillStyle = node.color || "rgba(118, 185, 0, 0.8)"
           }
 
           ctx.fill()
@@ -876,8 +883,8 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
           // Draw node label
           ctx.font =
             node.id === hoveredNode || node.id === selectedNodeId
-              ? "bold 12px Inter, sans-serif"
-              : "11px Inter, sans-serif"
+              ? "bold 13px Inter, sans-serif"
+              : "12px Inter, sans-serif"
 
           ctx.fillStyle = "rgba(255, 255, 255, 0.9)"
           ctx.textAlign = "center"
@@ -893,11 +900,11 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
             const labelHeight = 20
 
             // Always add background for important nodes
-            ctx.fillStyle = "rgba(0, 0, 0, 0.8)"
+            ctx.fillStyle = "rgba(0, 0, 0, 0.55)"
             ctx.fillRect(x - labelWidth / 2, y + radius + 4, labelWidth, labelHeight)
 
             // Text color
-            ctx.fillStyle = isHighlightedNode ? "white" : "rgba(255, 255, 255, 0.9)"
+            ctx.fillStyle = "#FFFFFF"
             ctx.fillText(node.label, x, y + radius + 14)
           }
         }
@@ -906,12 +913,6 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
       drawFullGraph()
     }
   }, [isFullscreen, isBrowserFullscreen, simulation, zoom, offset, hoveredNode, selectedNodeId])
-
-  // Add toggle function for simulation pause/play
-  const toggleSimulation = useCallback(() => {
-    setSimulationPaused(!simulationPaused);
-    setSimulation(prev => prev ? { ...prev, isRunning: simulationPaused } : null);
-  }, [simulationPaused]);
 
   // Add UI control for CPU clustering toggle
   useEffect(() => {
@@ -960,17 +961,19 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
               const tx = centerX + (targetNode.x + offset.x) * zoom;
               const ty = centerY + (targetNode.y + offset.y) * zoom;
               
-              // Highlight links connected to selected node
-              if (
+              const isHighlighted =
                 hoveredNode === sourceNode.id ||
                 hoveredNode === targetNode.id ||
                 selectedNodeId === sourceNode.id ||
                 selectedNodeId === targetNode.id
-              ) {
+              const defaultLinkColor = link.color || "rgba(255, 255, 255, 0.5)"
+
+              // Highlight links connected to selected node
+              if (isHighlighted) {
                 ctx.strokeStyle = "rgba(118, 185, 0, 0.7)";
                 ctx.lineWidth = 2.5;
               } else {
-                ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+                ctx.strokeStyle = defaultLinkColor;
                 ctx.lineWidth = 1;
               }
               
@@ -994,7 +997,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
                 ty - arrowLength * Math.sin(angle + Math.PI / 6)
               );
               ctx.closePath();
-              ctx.fillStyle = "rgba(118, 185, 0, 0.7)";
+              ctx.fillStyle = isHighlighted ? "rgba(118, 185, 0, 0.7)" : (link.color || "rgba(118, 185, 0, 0.7)");
               ctx.fill();
             }
           }
@@ -1025,7 +1028,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
             } else if (node.id === hoveredNode) {
               ctx.fillStyle = "#d0ff50"; // Yellow-green for hovered
             } else {
-              ctx.fillStyle = "rgba(118, 185, 0, 0.8)"; // Default
+              ctx.fillStyle = node.color || "rgba(118, 185, 0, 0.8)"; // Default
             }
             
             ctx.fill();
@@ -1046,7 +1049,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
             const isHighlightedNode = node.id === hoveredNode || isSelected;
             
             if (isImportantNode || isHighlightedNode) {
-              ctx.font = isSelected ? "bold 12px Inter, sans-serif" : "11px Inter, sans-serif";
+              ctx.font = isSelected ? "bold 13px Inter, sans-serif" : "12px Inter, sans-serif";
               
               // Background for label
               const labelWidth = ctx.measureText(node.label).width + 8;
@@ -1054,17 +1057,17 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
               
               // Add background
               if (isSelected) {
-                ctx.fillStyle = "rgba(0, 128, 0, 0.9)";
+                ctx.fillStyle = "rgba(0, 128, 0, 0.75)";
               } else if (isConnectedToSelected) {
-                ctx.fillStyle = "rgba(0, 64, 128, 0.9)";
+                ctx.fillStyle = "rgba(0, 64, 128, 0.75)";
               } else {
-                ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+                ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
               }
               
               ctx.fillRect(x - labelWidth / 2, y + radius + 4, labelWidth, labelHeight);
               
               // Text color
-              ctx.fillStyle = "white";
+              ctx.fillStyle = "#FFFFFF";
               ctx.textAlign = "center";
               ctx.textBaseline = "middle";
               ctx.fillText(node.label, x, y + radius + 14);
@@ -1110,17 +1113,6 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
 
         {/* Controls */}
         <div className="absolute top-2 right-2 flex flex-col gap-2">
-          {/* Add play/pause simulation button */}
-          <button
-            onClick={toggleSimulation}
-            className="p-2 bg-black/70 hover:bg-black/90 text-white rounded-full z-10"
-            type="button"
-            onMouseEnter={(e) => handleButtonMouseEnter(e, simulationPaused ? "Start simulation" : "Pause simulation")}
-            onMouseLeave={handleButtonMouseLeave}
-          >
-            {simulationPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
-          </button>
-
           <button
             onClick={handleZoomIn}
             className="p-2 bg-black/70 hover:bg-black/90 text-white rounded-full z-10"
@@ -1141,43 +1133,7 @@ export function FallbackGraph({ nodes, edges, fullscreen = false, highlightedNod
             <ZoomOut className="h-4 w-4" />
           </button>
 
-          <button
-            onClick={toggleNodeLimit}
-            className="p-2 bg-black/70 hover:bg-black/90 text-white rounded-full z-10"
-            type="button"
-            onMouseEnter={(e) => handleButtonMouseEnter(e, "Toggle node limit")}
-            onMouseLeave={handleButtonMouseLeave}
-          >
-            <Filter className="h-4 w-4" />
-          </button>
         </div>
-
-        {/* Node limit controls */}
-        {showNodeLimitWarning && (
-          <div className="absolute bottom-2 right-2 bg-black/70 rounded px-2 py-1 flex items-center gap-2">
-            <button
-              onClick={handleDecreaseNodeLimit}
-              className="text-white text-xs px-2 py-0.5 bg-gray-700 rounded hover:bg-gray-600"
-              disabled={nodeLimit <= 25}
-              type="button"
-              onMouseEnter={(e) => handleButtonMouseEnter(e, "Show fewer nodes")}
-              onMouseLeave={handleButtonMouseLeave}
-            >
-              -
-            </button>
-            <span className="text-xs text-white">{nodeLimit} nodes</span>
-            <button
-              onClick={handleIncreaseNodeLimit}
-              className="text-white text-xs px-2 py-0.5 bg-gray-700 rounded hover:bg-gray-600"
-              disabled={nodeLimit >= 500}
-              type="button"
-              onMouseEnter={(e) => handleButtonMouseEnter(e, "Show more nodes")}
-              onMouseLeave={handleButtonMouseLeave}
-            >
-              +
-            </button>
-          </div>
-        )}
 
         {/* Selected node info */}
         {selectedNodeId && (

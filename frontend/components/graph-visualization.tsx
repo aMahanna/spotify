@@ -16,9 +16,7 @@
 //
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
-import { FallbackGraph } from "./fallback-graph"
-import { CuboidIcon as Cube, LayoutGrid } from "lucide-react"
+import { useEffect, useRef, useCallback, useState } from "react"
 import type { NodeDocument, EdgeDocument } from "@/types/graph"
 
 interface GraphVisualizationProps {
@@ -26,8 +24,8 @@ interface GraphVisualizationProps {
   edges: EdgeDocument[]
   fullscreen?: boolean
   highlightedNodes?: string[]
-  layoutType?: string
-  initialMode?: '2d' | '3d'
+  selectedNodeId?: string | null
+  layoutType?: "force" | "hierarchical" | "radial"
 }
 
 export function GraphVisualization({ 
@@ -35,15 +33,14 @@ export function GraphVisualization({
   edges,
   fullscreen = false,
   highlightedNodes = [],
-  layoutType = "force",
-  initialMode = '2d'
+  selectedNodeId = null,
+  layoutType = "force"
 }: GraphVisualizationProps) {
-  // Default to 2D view unless explicitly set to 3D
-  const [use3D, setUse3D] = useState(initialMode === '3d')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const loadTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const pendingGraphPayloadRef = useRef<{ nodes: NodeDocument[]; edges: EdgeDocument[] } | null>(null)
   
   // Handle 3D view errors that come from the iframe
   const handleIframeError = useCallback((event: MessageEvent) => {
@@ -55,46 +52,52 @@ export function GraphVisualization({
   
   // Handle 3D view in an iframe to completely isolate it from the main DOM
   useEffect(() => {
-    if (use3D) {
-      setIsLoading(true);
-      setError(null);
+    setIsLoading(true);
+    setError(null);
+    
+    // Set a safety timeout in case the iframe never loads
+    loadTimerRef.current = setTimeout(() => {
+      setIsLoading(false);
+    }, 10000); // 10 second timeout
+    
+    if (iframeRef.current) {
+      // Create an event listener to know when the iframe is loaded
+      const handleLoad = () => {
+        if (loadTimerRef.current) {
+          clearTimeout(loadTimerRef.current);
+          loadTimerRef.current = null;
+        }
+        
+        setTimeout(() => {
+          setIsLoading(false);
+        }, 2000);
+
+        if (pendingGraphPayloadRef.current && iframeRef.current?.contentWindow) {
+          iframeRef.current.contentWindow.postMessage(
+            {
+              type: "graph-data",
+              payload: pendingGraphPayloadRef.current
+            },
+            window.location.origin
+          );
+          pendingGraphPayloadRef.current = null;
+        }
+      };
       
-      // Set a safety timeout in case the iframe never loads
-      loadTimerRef.current = setTimeout(() => {
-        setIsLoading(false);
-      }, 10000); // 10 second timeout
+      // Add the event listener
+      iframeRef.current.addEventListener('load', handleLoad);
       
-      if (iframeRef.current) {
-        // Create an event listener to know when the iframe is loaded
-        const handleLoad = () => {
-          if (loadTimerRef.current) {
-            clearTimeout(loadTimerRef.current);
-            loadTimerRef.current = null;
-          }
-          
-          setTimeout(() => {
-            setIsLoading(false);
-          }, 2000);
-        };
-        
-        // Add the event listener
-        iframeRef.current.addEventListener('load', handleLoad);
-        
-        // Add message listener for error communication
-        window.addEventListener('message', handleIframeError);
-        
+      // Add message listener for error communication
+      window.addEventListener('message', handleIframeError);
+      
+      const setupIframe = async () => {
         try {
           // Get graph ID from URL if available
           const params = new URLSearchParams(window.location.search);
-          const graphId = params.get("id");
-          
-          // Add highlighted nodes and layout type to the iframe parameters
-          const highlightedNodesParam = highlightedNodes.length > 0 
-            ? `&highlightedNodes=${encodeURIComponent(JSON.stringify(highlightedNodes))}` 
-            : '';
+          const graphId = params.get("id") || params.get("graph_id");
           
           const timestamp = Date.now();
-          const baseParams = `&fullscreen=${fullscreen}&layout=${layoutType}${highlightedNodesParam}&t=${timestamp}`;
+          const baseParams = `&fullscreen=${fullscreen}&layout=${layoutType}&t=${timestamp}`;
           
           let iframeSrc = '';
           
@@ -102,184 +105,108 @@ export function GraphVisualization({
             // If we have a graph ID, we can just pass that
             iframeSrc = `/graph3d?id=${graphId}${baseParams}`;
           } else {
-            // For large edge data, try to use stored database data first
-            const MAX_URL_EDGES = 100; // Maximum number of edges to include in URL
             const graphPayload = { nodes, edges }
-            
-            if (edges.length > MAX_URL_EDGES) {
-              console.log(`Large dataset detected (${edges.length} edges), attempting to use stored database data`);
-              
-              // Try to store in database first, then use stored source
-              fetch('/api/graph-db/triples', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                  nodes,
-                  edges,
-                  documentName: 'Graph Visualization Data'
-                })
-              }).then(response => {
-                if (response.ok) {
-                  console.log('Successfully stored graph data in database, using stored source');
-                  // Update iframe to use stored source
-                  if (iframeRef.current) {
-                    iframeRef.current.src = `/graph3d?source=stored${baseParams}`;
-                  }
+            const storageId = `graph_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`
+            try {
+              localStorage.setItem(storageId, JSON.stringify(graphPayload));
+              iframeSrc = `/graph3d?storageId=${storageId}${baseParams}`;
+            } catch (storageError: any) {
+              if (storageError?.name !== "QuotaExceededError") {
+                console.error("localStorage failed:", storageError);
+              }
+              try {
+                const response = await fetch("/api/graph-data", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ nodes, edges, documentName: "Embedded Graph" })
+                });
+                if (!response.ok) {
+                  const errorText = await response.text();
+                  throw new Error(errorText || "Failed to store graph data");
+                }
+                const result = await response.json();
+                if (result?.graphId) {
+                  iframeSrc = `/graph3d?id=${encodeURIComponent(result.graphId)}${baseParams}`;
                 } else {
-                  console.warn('Failed to store in database, using localStorage fallback');
-                  // Fallback to localStorage
-                  const storageId = `graph_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-                  try {
-                    localStorage.setItem(storageId, JSON.stringify(graphPayload));
-                    console.log(`Stored ${edges.length} edges in localStorage with ID: ${storageId}`);
-                    if (iframeRef.current) {
-                      iframeRef.current.src = `/graph3d?storageId=${storageId}${baseParams}`;
-                    }
-                  } catch (storageError) {
-                    console.error("Both database and localStorage failed:", storageError);
-                    console.warn(`Using limited edges (${MAX_URL_EDGES} of ${edges.length}) to avoid header size issues`);
-                    const limitedEdges = edges.slice(0, MAX_URL_EDGES);
-                    const limitedNodeIds = new Set<string>([
-                      ...limitedEdges.map((edge) => edge._from),
-                      ...limitedEdges.map((edge) => edge._to)
-                    ]);
-                    const limitedNodes = nodes.filter((node) => limitedNodeIds.has(node._id));
-                    if (iframeRef.current) {
-                      iframeRef.current.src = `/graph3d?nodes=${encodeURIComponent(JSON.stringify(limitedNodes))}&edges=${encodeURIComponent(JSON.stringify(limitedEdges))}${baseParams}`;
-                    }
-                  }
+                  throw new Error("Missing graphId in response");
                 }
-              }).catch(error => {
-                console.error('Error storing graph data in database:', error);
-                // Fallback to localStorage
-                const storageId = `graph_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-                try {
-                  localStorage.setItem(storageId, JSON.stringify(graphPayload));
-                  console.log(`Stored ${edges.length} edges in localStorage with ID: ${storageId}`);
-                  if (iframeRef.current) {
-                    iframeRef.current.src = `/graph3d?storageId=${storageId}${baseParams}`;
-                  }
-                } catch (storageError) {
-                  console.error("Both database and localStorage failed:", storageError);
-                  console.warn(`Using limited edges (${MAX_URL_EDGES} of ${edges.length}) to avoid header size issues`);
-                  const limitedEdges = edges.slice(0, MAX_URL_EDGES);
-                  const limitedNodeIds = new Set<string>([
-                    ...limitedEdges.map((edge) => edge._from),
-                    ...limitedEdges.map((edge) => edge._to)
-                  ]);
-                  const limitedNodes = nodes.filter((node) => limitedNodeIds.has(node._id));
-                  if (iframeRef.current) {
-                    iframeRef.current.src = `/graph3d?nodes=${encodeURIComponent(JSON.stringify(limitedNodes))}&edges=${encodeURIComponent(JSON.stringify(limitedEdges))}${baseParams}`;
-                  }
-                }
-              });
-              
-              // Set initial iframe src to stored source (will be updated by the fetch above)
-              iframeSrc = `/graph3d?source=stored${baseParams}`;
-            } else {
-              // For small data sets, just use the URL parameter approach
-              iframeSrc = `/graph3d?nodes=${encodeURIComponent(JSON.stringify(nodes))}&edges=${encodeURIComponent(JSON.stringify(edges))}${baseParams}`;
+              } catch (apiError) {
+                console.error("API storage failed:", apiError);
+                pendingGraphPayloadRef.current = graphPayload;
+                iframeSrc = `/graph3d?source=message${baseParams}`;
+              }
             }
           }
           
           // Set the iframe source
-          iframeRef.current.src = iframeSrc;
+          if (iframeRef.current) {
+            iframeRef.current.src = iframeSrc;
+          }
         } catch (err) {
           console.error("Error setting iframe source:", err);
           setError("Failed to prepare graph data for visualization");
           setIsLoading(false);
         }
-        
-        // Clean up
-        return () => {
-          if (loadTimerRef.current) {
-            clearTimeout(loadTimerRef.current);
-          }
-          if (iframeRef.current) {
-            iframeRef.current.removeEventListener('load', handleLoad);
-          }
-          window.removeEventListener('message', handleIframeError);
-        };
-      }
+      };
+      
+      setupIframe();
+      
+      // Clean up
+      return () => {
+        if (loadTimerRef.current) {
+          clearTimeout(loadTimerRef.current);
+        }
+        if (iframeRef.current) {
+          iframeRef.current.removeEventListener('load', handleLoad);
+        }
+        window.removeEventListener('message', handleIframeError);
+      };
     }
-  }, [use3D, nodes, edges, fullscreen, handleIframeError, highlightedNodes, layoutType]);
-  
-  // Handle switching to 2D view
-  const switchTo2D = () => {
-    setUse3D(false);
-    setError(null);
-  };
-  
-  // Handle switching to 3D view
-  const switchTo3D = () => {
-    setUse3D(true);
-    setError(null);
-  };
+  }, [nodes, edges, fullscreen, handleIframeError, layoutType]);
+
+  useEffect(() => {
+    const targetWindow = iframeRef.current?.contentWindow;
+    if (!targetWindow) return;
+    targetWindow.postMessage(
+      {
+        type: "graph-select",
+        highlightedNodes,
+        selectedNodeId
+      },
+      window.location.origin
+    );
+  }, [highlightedNodes, selectedNodeId]);
   
   return (
     <div className={`relative ${fullscreen ? "h-full" : "h-[500px]"}`}>
-      {use3D ? (
-        <div className="relative h-full w-full">
-          <iframe
-            ref={iframeRef}
-            className="w-full h-full border-0"
-            title="3D Graph Visualization"
-            sandbox="allow-scripts allow-same-origin"
-          />
-          
-          <button
-            onClick={switchTo2D}
-            className="absolute bottom-2 right-2 px-3 py-1.5 bg-black/70 hover:bg-black/90 text-white text-xs rounded-full flex items-center gap-1.5 z-20"
-            disabled={isLoading}
-          >
-            <LayoutGrid className="h-3.5 w-3.5" />
-            <span>2D View</span>
-          </button>
-          
-          {isLoading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-10">
-              <div className="flex flex-col items-center gap-3">
-                <div className="animate-spin w-12 h-12 rounded-full border-t-2 border-l-2 border-primary border-r-transparent border-b-transparent"></div>
-                <div className="text-primary font-medium">Loading 3D graph visualization...</div>
-                <div className="text-xs text-gray-400">This may take a moment</div>
-              </div>
+      <div className="relative h-full w-full">
+        <iframe
+          ref={iframeRef}
+          className="w-full h-full border-0"
+          title="3D Graph Visualization"
+          sandbox="allow-scripts allow-same-origin"
+        />
+        
+        {isLoading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-10">
+            <div className="flex flex-col items-center gap-3">
+              <div className="animate-spin w-12 h-12 rounded-full border-t-2 border-l-2 border-primary border-r-transparent border-b-transparent"></div>
+              <div className="text-primary font-medium">Loading 3D graph visualization...</div>
+              <div className="text-xs text-gray-400">This may take a moment</div>
             </div>
-          )}
-          
-          {error && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10">
-              <div className="text-red-500 p-6 bg-black/90 rounded-lg max-w-md text-center">
-                <p className="font-bold mb-3">Error loading 3D visualization</p>
-                <p className="text-sm mb-4">{error}</p>
-                <p className="text-xs mb-4 text-gray-400">Your browser may not support WebGL or 3D rendering.</p>
-                <button
-                  onClick={switchTo2D}
-                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded"
-                >
-                  Switch to 2D View
-                </button>
-              </div>
+          </div>
+        )}
+        
+        {error && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10">
+            <div className="text-red-500 p-6 bg-black/90 rounded-lg max-w-md text-center">
+              <p className="font-bold mb-3">Error loading 3D visualization</p>
+              <p className="text-sm mb-4">{error}</p>
+              <p className="text-xs mb-4 text-gray-400">Your browser may not support WebGL or 3D rendering.</p>
             </div>
-          )}
-        </div>
-      ) : (
-        <div className="relative h-full w-full">
-          <FallbackGraph 
-            nodes={nodes}
-            edges={edges}
-            fullscreen={fullscreen}
-            highlightedNodes={highlightedNodes}
-          />
-          
-          <button
-            onClick={switchTo3D}
-            className="absolute bottom-2 right-2 px-3 py-1.5 bg-black/70 hover:bg-black/90 text-white text-xs rounded-full flex items-center gap-1.5"
-          >
-            <Cube className="h-3.5 w-3.5" />
-            <span>3D View</span>
-          </button>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

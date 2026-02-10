@@ -36,7 +36,7 @@
  * - /graph3d?source=local&triples=[{"subject":"A","predicate":"relates_to","object":"B"}]
  */
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useMemo, useRef } from "react"
 import dynamic from "next/dynamic"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -49,8 +49,14 @@ import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Separator } from "@/components/ui/separator"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Loader2, Cpu, Monitor, Settings, Brain, Layers, Zap, ChevronDown, ChevronRight } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { GraphLegend } from "@/components/graph-legend"
+import { getEdgeColor, getNodeColor } from "@/lib/collection-colors"
+import { GraphChatPanel } from "@/components/graph-chat-panel"
+import { GraphSelectionPanel } from "@/components/graph-selection-panel"
+import { buildTourOrder, DEFAULT_TOUR_NODE_COUNT } from "@/lib/graph-tour"
 
 // Dynamically import the ForceGraphWrapper component with SSR disabled
 const ForceGraphWrapper = dynamic(
@@ -72,12 +78,18 @@ interface PerformanceMetrics {
   memoryUsage?: number
 }
 
+const TOUR_STEP_MS = 4608
+const TOUR_FOCUS_MS = 3384
+
 export default function Graph3DPage() {
   const [graphData, setGraphData] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [debugInfo, setDebugInfo] = useState<string>("")
   const [highlightedNodes, setHighlightedNodes] = useState<string[]>([])
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [searchTerm, setSearchTerm] = useState<string>("")
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false)
   const [layoutType, setLayoutType] = useState<string>("3d")
   const [useEnhancedWebGPU, setUseEnhancedWebGPU] = useState<boolean>(false)
   const [enableClustering, setEnableClustering] = useState<boolean>(true)
@@ -85,6 +97,22 @@ export default function Graph3DPage() {
   const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null)
   const [showClusteringControls, setShowClusteringControls] = useState<boolean>(false)
   const [clusteringOptionsExpanded, setClusteringOptionsExpanded] = useState<boolean>(false)
+  const [selectedNodeData, setSelectedNodeData] = useState<any | null>(null)
+  const [selectedNodes, setSelectedNodes] = useState<any[]>([])
+  const [selectedEdges, setSelectedEdges] = useState<any[]>([])
+  const [isTourActive, setIsTourActive] = useState<boolean>(false)
+  const [tourSignal, setTourSignal] = useState<{
+    type: "step" | "done" | "stop"
+    nodeId?: string
+    index?: number
+    total?: number
+    nonce: number
+  } | null>(null)
+  const [fitViewNonce, setFitViewNonce] = useState(0)
+  const tourOrderRef = useRef<string[]>([])
+  const tourIndexRef = useRef<number>(0)
+  const tourTimerRef = useRef<number | null>(null)
+  const tourSignalNonceRef = useRef<number>(0)
   
   // Semantic clustering options
   const [clusteringMethod, setClusteringMethod] = useState<string>("hybrid")
@@ -96,6 +124,220 @@ export default function Graph3DPage() {
   const [spatialWeight, setSpatialWeight] = useState<number>(0.1)
   
   const { toast } = useToast()
+
+  const normalizeGraphData = useCallback((data: any) => {
+    if (!data) return data
+    const nodes = Array.isArray(data.nodes)
+      ? data.nodes.map((node: any) => ({
+          ...node,
+          color: node.color || getNodeColor(node),
+        }))
+      : undefined
+
+    let links = Array.isArray(data.links) ? data.links : undefined
+    if (!links && Array.isArray(data.edges) && Array.isArray(data.nodes)) {
+      links = data.edges
+        .map((edge: any) => {
+          if (!edge?._from || !edge?._to || !edge?.label) return null
+          return {
+            id: edge._id,
+            source: edge._from,
+            target: edge._to,
+            name: edge.label,
+            color: getEdgeColor(edge),
+          }
+        })
+        .filter(Boolean)
+    }
+    if (!links && Array.isArray(data.nodes)) {
+      links = []
+    }
+    if (links) {
+      links = links.map((link: any) => ({
+        ...link,
+        color: link.color || getEdgeColor(link),
+      }))
+    }
+
+    return {
+      ...data,
+      nodes,
+      links,
+    }
+  }, [])
+
+  const isSongNode = useCallback((node: any) => {
+    if (!node) return false
+    const group = String(node.group || node.type || "").toLowerCase()
+    if (group === "songs" || group === "song") return true
+    const rawId = String(node._id || "")
+    return rawId.includes("_songs/")
+  }, [])
+
+  const isArtistNode = useCallback((node: any) => {
+    if (!node) return false
+    const group = String(node.group || node.type || "").toLowerCase()
+    if (group === "artists" || group === "artist") return true
+    const rawId = String(node._id || "")
+    return rawId.includes("_artists/")
+  }, [])
+
+  const handleNodeSelect = useCallback((node: any | null) => {
+    if (!node) {
+      setSelectedNodeId(null)
+      setSelectedNodeData(null)
+      return
+    }
+    setSelectedNodeId(String(node.id || node._id || node.name))
+    setSelectedNodeData(node)
+  }, [])
+
+  const handleSelectionChange = useCallback((selection: { nodes: any[]; edges: any[] }) => {
+    setSelectedNodes(selection.nodes)
+    setSelectedEdges(selection.edges)
+  }, [])
+
+  const stopTour = useCallback(() => {
+    if (tourTimerRef.current !== null) {
+      window.clearTimeout(tourTimerRef.current)
+      tourTimerRef.current = null
+    }
+    tourIndexRef.current = 0
+    tourOrderRef.current = []
+    setIsTourActive(false)
+    tourSignalNonceRef.current += 1
+    setTourSignal({ type: "stop", nonce: tourSignalNonceRef.current })
+  }, [])
+
+  const stepTour = useCallback(() => {
+    const order = tourOrderRef.current
+    if (!order.length) {
+      setIsTourActive(false)
+      setHighlightedNodes([])
+      setSelectedNodeId(null)
+      tourSignalNonceRef.current += 1
+      setTourSignal({ type: "done", nonce: tourSignalNonceRef.current })
+      setFitViewNonce((prev) => prev + 1)
+      return
+    }
+    const idx = tourIndexRef.current
+    if (idx >= order.length) {
+      setIsTourActive(false)
+      setHighlightedNodes([])
+      setSelectedNodeId(null)
+      tourSignalNonceRef.current += 1
+      setTourSignal({ type: "done", nonce: tourSignalNonceRef.current })
+      setFitViewNonce((prev) => prev + 1)
+      return
+    }
+    const nodeId = order[idx]
+    setHighlightedNodes([nodeId])
+    setSelectedNodeId(nodeId)
+    tourSignalNonceRef.current += 1
+    setTourSignal({
+      type: "step",
+      nodeId,
+      index: idx,
+      total: order.length,
+      nonce: tourSignalNonceRef.current,
+    })
+    tourIndexRef.current = idx + 1
+    if (tourIndexRef.current < order.length) {
+      tourTimerRef.current = window.setTimeout(stepTour, TOUR_STEP_MS)
+    } else {
+      setIsTourActive(false)
+      setHighlightedNodes([])
+      setSelectedNodeId(null)
+      tourSignalNonceRef.current += 1
+      setTourSignal({ type: "done", nonce: tourSignalNonceRef.current })
+      setFitViewNonce((prev) => prev + 1)
+    }
+  }, [])
+
+  const startTour = useCallback(
+    (overrideOrder?: string[]) => {
+      if (!graphData) return
+      stopTour()
+      const order =
+        overrideOrder && overrideOrder.length > 0
+          ? overrideOrder
+          : buildTourOrder(graphData, DEFAULT_TOUR_NODE_COUNT)
+      if (!order.length) return
+      tourOrderRef.current = order
+      tourIndexRef.current = 0
+      setIsTourActive(true)
+      stepTour()
+    },
+    [graphData, stopTour, stepTour]
+  )
+
+  const handleSearch = useCallback(() => {
+    const normalizeText = (value: string) =>
+      value
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim()
+
+    const term = normalizeText(searchTerm)
+    if (!term) {
+      setHighlightedNodes([])
+      setSelectedNodeId(null)
+      return
+    }
+    const nodes = Array.isArray(graphData?.nodes) ? graphData.nodes : []
+    const match = nodes.find((node: any) => {
+      const name = normalizeText(String(node?.name || node?.label || node?.id || ""))
+      return name.includes(term)
+    })
+    if (!match) {
+      setHighlightedNodes([])
+      setSelectedNodeId(null)
+      return
+    }
+    const nodeId = String(match.id || match._id || match.name)
+    setHighlightedNodes([nodeId])
+    setSelectedNodeId(nodeId)
+  }, [graphData, searchTerm])
+
+  useEffect(() => {
+    if (!selectedNodeId) {
+      setSelectedNodeData(null)
+      return
+    }
+    const nodes = Array.isArray(graphData?.nodes) ? graphData.nodes : []
+    const normalizedSelected = selectedNodeId.toLowerCase().trim()
+    const match = nodes.find((node: any) => {
+      const id = String(node.id || node._id || "").toLowerCase().trim()
+      const name = String(node.name || node.label || "").toLowerCase().trim()
+      return id === normalizedSelected || name === normalizedSelected
+    })
+    setSelectedNodeData(match || null)
+  }, [selectedNodeId, graphData])
+
+  useEffect(() => {
+    if (graphData) {
+      stopTour()
+    }
+  }, [graphData, stopTour])
+
+  useEffect(() => {
+    return () => {
+      stopTour()
+    }
+  }, [stopTour])
+
+  const selectedStories = useMemo(() => {
+    if (!selectedNodeData || !isSongNode(selectedNodeData)) return []
+    const stories = selectedNodeData.stories
+    return Array.isArray(stories) ? stories : []
+  }, [selectedNodeData, isSongNode])
+
+  const selectedArtistStories = useMemo(() => {
+    if (!selectedNodeData || !isArtistNode(selectedNodeData)) return []
+    const stories = selectedNodeData.stories
+    return Array.isArray(stories) ? stories : []
+  }, [selectedNodeData, isArtistNode])
 
   // Handle clustering performance updates
   const handleClusteringUpdate = useCallback((metrics: PerformanceMetrics) => {
@@ -134,12 +376,10 @@ export default function Graph3DPage() {
         // Check URL parameters
         const params = new URLSearchParams(window.location.search)
         const graphId = params.get("id")
-        const triplesParam = params.get("triples")
-        const nodesParam = params.get("nodes")
-        const edgesParam = params.get("edges")
         const layoutParam = params.get("layout")
         const highlightedNodesParam = params.get("highlightedNodes")
-        const storageId = params.get("storageId")
+        const selectedNodeParam = params.get("selectedNodeId") || params.get("selectedNode")
+        const fullscreenParam = params.get("fullscreen")
         const source = params.get("source")
         
         // Set layout type from URL parameter
@@ -160,129 +400,38 @@ export default function Graph3DPage() {
             console.error("Failed to parse highlightedNodes from URL:", parseError)
           }
         }
+        if (selectedNodeParam) {
+          setSelectedNodeId(decodeURIComponent(selectedNodeParam))
+        }
+        setIsFullscreen(fullscreenParam !== "false")
         
         console.log("URL parameters:", { 
           graphId: graphId || "not provided", 
-          hasTriples: !!triplesParam,
-          hasNodes: !!nodesParam,
-          hasEdges: !!edgesParam,
-          hasStorageId: !!storageId,
+          hasTriples: false,
+          hasNodes: false,
+          hasEdges: false,
+          hasStorageId: false,
           layout: layoutParam || "default",
           highlightedNodes: highlightedNodesParam ? "provided" : "not provided",
           source: source || "auto",
           allParams: Object.fromEntries(params.entries())
         });
         
-        // Try to load from localStorage if storageId is provided
-        if (storageId) {
-          try {
-            console.log("Found storageId in URL, attempting to retrieve data from localStorage:", storageId);
-            const storedData = localStorage.getItem(storageId);
-            
-            if (!storedData) {
-              console.error("No data found in localStorage for storageId:", storageId);
-              setError("Could not find the graph data in your browser storage. It may have expired.");
-              setIsLoading(false);
-              return;
-            }
-            
-            const parsedData = JSON.parse(storedData);
-            if (Array.isArray(parsedData)) {
-              console.log("Successfully retrieved triples from localStorage:", { 
-                count: parsedData.length,
-                sample: parsedData.slice(0, 2)
-              });
-              setGraphData({ triples: parsedData });
-            } else if (parsedData?.nodes && parsedData?.edges) {
-              console.log("Successfully retrieved nodes/edges from localStorage:", { 
-                nodes: parsedData.nodes.length,
-                edges: parsedData.edges.length
-              });
-              const links = Array.isArray(parsedData.links) ? parsedData.links : parsedData.edges
-                .map((edge: any) => {
-                  if (!edge?._from || !edge?._to || !edge?.label) return null
-                  return { source: edge._from, target: edge._to, name: edge.label }
-                })
-                .filter(Boolean)
-              setGraphData({ nodes: parsedData.nodes, edges: parsedData.edges, links });
-            } else {
-              throw new Error("Invalid data in localStorage");
-            }
-            // setDebugInfo(`Using stored graph data from browser storage (ID: ${storageId})`);
-            setIsLoading(false);
-            
-            // Clean up localStorage after retrieval to prevent buildup
-            // Only do this for older IDs to prevent issues with multiple tabs/windows
-            const currentTime = Date.now();
-            const idTimestamp = parseInt(storageId.split('_')[1] || '0', 10);
-            
-            // If the ID is older than 5 minutes, clean it up
-            if (currentTime - idTimestamp > 5 * 60 * 1000) {
-              console.log("Cleaning up old localStorage entry:", storageId);
-              localStorage.removeItem(storageId);
-            }
-            
-            return;
-          } catch (storageError) {
-            console.error("Error retrieving data from localStorage:", storageError);
-            setDebugInfo("Failed to retrieve triples from browser storage, falling back to API");
-            // Continue to other methods if parsing fails
-          }
-        }
-        
-        // If we have triples passed directly in the URL param
-        if (nodesParam && edgesParam) {
-          try {
-            console.log("Found nodes/edges data in URL parameters, attempting to parse")
-            const nodes = JSON.parse(decodeURIComponent(nodesParam))
-            const edges = JSON.parse(decodeURIComponent(edgesParam))
-            console.log("Successfully parsed nodes/edges from URL:", { 
-              nodeCount: nodes.length,
-              edgeCount: edges.length
-            });
-            const links = edges
-              .map((edge: any) => {
-                if (!edge?._from || !edge?._to || !edge?.label) return null
-                return { source: edge._from, target: edge._to, name: edge.label }
-              })
-              .filter(Boolean)
-            setGraphData({ nodes, edges, links })
-            setDebugInfo("Using nodes/edges data from URL parameters")
-            setIsLoading(false)
-            return
-          } catch (parseError) {
-            console.error("Error parsing nodes/edges from URL:", parseError)
-            setDebugInfo("Failed to parse nodes/edges from URL, falling back to API")
-            // Continue to other methods if parsing fails
-          }
+        if (source === "message") {
+          setGraphData(null);
+          setError(null);
+          setDebugInfo("Waiting for graph data from parent frame");
+          setIsLoading(true);
+          return;
         }
 
-        if (triplesParam) {
-          try {
-            console.log("Found triples data in URL parameter, attempting to parse")
-            const triples = JSON.parse(decodeURIComponent(triplesParam))
-            console.log("Successfully parsed triples from URL:", { 
-              count: triples.length,
-              sample: triples.slice(0, 2)
-            });
-            setGraphData({ triples })
-            setDebugInfo("Using triples data from URL parameter")
-            setIsLoading(false)
-            return
-          } catch (parseError) {
-            console.error("Error parsing triples from URL:", parseError)
-            setDebugInfo("Failed to parse triples from URL, falling back to API")
-            // Continue to other methods if parsing fails
-          }
-        }
-        
         // Determine data source based on URL parameters
         let endpoint: string;
         let useStoredTriples = false;
         
         if (graphId) {
           endpoint = `/api/graph-data?id=${graphId}`;
-        } else if (source === 'stored' || (!triplesParam && !nodesParam && !edgesParam && !storageId)) {
+        } else if (source === 'stored') {
           // Use stored triples if explicitly requested or if no other data source is available
           endpoint = '/api/graph-db/triples';
           useStoredTriples = true;
@@ -306,7 +455,7 @@ export default function Graph3DPage() {
             const fallbackResponse = await fetch('/api/graph-data');
             if (fallbackResponse.ok) {
               const fallbackData = await fallbackResponse.json();
-              setGraphData(fallbackData);
+              setGraphData(normalizeGraphData(fallbackData));
               setIsLoading(false);
               return;
             }
@@ -343,24 +492,34 @@ export default function Graph3DPage() {
           data.links = data.edges
             .map((edge: any) => {
               if (!edge?._from || !edge?._to || !edge?.label) return null
-              return { source: edge._from, target: edge._to, name: edge.label }
+              return {
+                id: edge._id,
+                source: edge._from,
+                target: edge._to,
+                name: edge.label,
+                color: getEdgeColor(edge)
+              }
             })
             .filter(Boolean)
         }
 
-        // Handle stored triples response format
-        if (useStoredTriples && data.triples && Array.isArray(data.triples)) {
-          console.log("Processing stored triples from graph database");
-          setGraphData({ triples: data.triples });
-          setDebugInfo(`Using ${data.triples.length} stored triples from ${data.databaseType || 'graph database'}`);
+        if (useStoredTriples && Array.isArray(data.nodes) && Array.isArray(data.edges)) {
+          console.log("Processing stored node/edge documents from graph database");
+          const nodesWithColors = data.nodes.map((node: any) => ({
+            ...node,
+            color: node.color || getNodeColor(node)
+          }))
+          setGraphData(normalizeGraphData({ nodes: nodesWithColors, edges: data.edges, links: data.links || [] }));
+          setDebugInfo(`Using ${data.nodes.length} nodes and ${data.edges.length} edges from ${data.databaseType || 'graph database'}`);
           setIsLoading(false);
           return;
         }
-
-        if (useStoredTriples && Array.isArray(data.nodes) && Array.isArray(data.edges)) {
-          console.log("Processing stored node/edge documents from graph database");
-          setGraphData({ nodes: data.nodes, edges: data.edges, links: data.links || [] });
-          setDebugInfo(`Using ${data.nodes.length} nodes and ${data.edges.length} edges from ${data.databaseType || 'graph database'}`);
+        
+        // Handle stored triples response format (fallback)
+        if (useStoredTriples && data.triples && Array.isArray(data.triples)) {
+          console.log("Processing stored triples from graph database");
+          setGraphData({ triples: data.triples });
+          setDebugInfo("");
           setIsLoading(false);
           return;
         }
@@ -379,10 +538,12 @@ export default function Graph3DPage() {
         } else if (hasNodeLinks || hasNodeEdges) {
           setDebugInfo(`Using nodes/links data (${data.nodes.length} nodes, ${data.links.length} links) from API`)
         }
+
         
         console.log("Setting graph data in state...");
-        setGraphData(data)
+        setGraphData(normalizeGraphData(data))
         setIsLoading(false)
+        setDebugInfo("")
       } catch (err) {
         console.error('Failed to load graph data:', err)
         setError(`Failed to load graph data: ${err instanceof Error ? err.message : String(err)}`)
@@ -392,6 +553,31 @@ export default function Graph3DPage() {
 
     fetchGraphData()
   }, [])
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return
+      const payload = event.data
+      if (!payload) return
+      if (payload.type === "graph-select") {
+        if (Array.isArray(payload.highlightedNodes)) {
+          setHighlightedNodes(payload.highlightedNodes)
+        }
+        if (typeof payload.selectedNodeId === "string" || payload.selectedNodeId === null) {
+          setSelectedNodeId(payload.selectedNodeId)
+        }
+        return
+      }
+      if (payload.type === "graph-data" && payload.payload) {
+        setGraphData(normalizeGraphData(payload.payload))
+        setError(null)
+        setIsLoading(false)
+        setDebugInfo("")
+      }
+    }
+    window.addEventListener("message", handleMessage)
+    return () => window.removeEventListener("message", handleMessage)
+  }, [startTour, stopTour, normalizeGraphData])
 
   useEffect(() => {
     // Add overflow: hidden to the body element when the component mounts
@@ -448,43 +634,60 @@ export default function Graph3DPage() {
     <div className="h-screen w-screen overflow-hidden">
       {graphData && (
         <>
+          {isFullscreen && (
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50">
+              <div className="flex items-center gap-2 bg-gray-800/80 px-3 py-2 rounded text-xs text-gray-300 shadow">
+                <Input
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      handleSearch()
+                    }
+                  }}
+                  placeholder="Find a node..."
+                  className="h-7 bg-gray-900/80 border-gray-700 text-xs text-gray-200 w-56"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleSearch}
+                  className="h-7 px-2 text-xs"
+                >
+                  Search
+                </Button>
+              </div>
+            </div>
+          )}
+          {isFullscreen && (
+            <div className="absolute top-20 left-4 z-50">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  const params = new URLSearchParams(window.location.search)
+                  const graphIdParam = params.get("id")
+                  window.location.href = graphIdParam
+                    ? `/?graph_id=${graphIdParam}`
+                    : "/"
+                }}
+                className="h-7 px-2 text-xs bg-gray-800/80 hover:bg-gray-700/80 border border-gray-600 text-gray-200"
+              >
+                Back to Home
+              </Button>
+            </div>
+          )}
+          {/* Clustering Toggle */}
+          {/* <button
+            onClick={() => setShowClusteringControls(!showClusteringControls)}
+            className="absolute top-20 left-4 z-50 bg-blue-800/80 hover:bg-blue-700/80 px-3 py-1 rounded text-xs text-white border border-blue-600 transition-colors flex items-center gap-1"
+          >
+            <Settings className="w-3 h-3" />
+            Clustering
+          </button> */}
+
           {/* Controls Panel */}
           <div className="absolute top-20 left-2 z-50 flex flex-col gap-2 max-w-sm">
-            {/* Main Controls Row */}
-            <div className="flex items-center gap-4">
-              {/* <div className="text-xs text-gray-500">
-                {graphData.nodes && graphData.links ? (
-                  `Rendering graph with ${graphData.nodes.length || 0} nodes and ${graphData.links.length || 0} links`
-                ) : graphData.triples ? (
-                  `Rendering graph from ${graphData.triples.length || 0} triples`
-                ) : (
-                  "Rendering graph data"
-                )}
-              </div> */}
-              
-              {/* WebGPU Mode Toggle */}
-              {/* <button
-                onClick={() => setUseEnhancedWebGPU(!useEnhancedWebGPU)}
-                className="bg-gray-800/80 hover:bg-gray-700/80 px-3 py-1 rounded text-xs text-white border border-gray-600 transition-colors"
-              >
-                {useEnhancedWebGPU ? '🔧 Enhanced WebGPU' : '🎮 Standard 3D'}
-              </button> */}
-              
-              {/* Clustering Controls Toggle */}
-              <button
-                onClick={() => setShowClusteringControls(!showClusteringControls)}
-                className="bg-blue-800/80 hover:bg-blue-700/80 px-3 py-1 rounded text-xs text-white border border-blue-600 transition-colors flex items-center gap-1"
-              >
-                <Settings className="w-3 h-3" />
-                Clustering
-              </button>
-            </div>
-
-            {/* Debug Info */}
-            {debugInfo && (
-              <div className="bg-gray-800/80 px-2 py-1 rounded text-xs text-gray-300">{debugInfo}</div>
-            )}
-
             {/* Enhanced Clustering Controls Panel */}
             {showClusteringControls && (
               <Card className="bg-black/95 border-gray-700 text-white max-w-sm">
@@ -726,6 +929,100 @@ export default function Graph3DPage() {
               </Card>
             )}
           </div>
+
+          {selectedStories.length > 0 && (
+            <div className="absolute top-20 right-2 z-50 w-[360px] max-h-[80vh]">
+              <Card className="bg-black/90 border-gray-700 text-white">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Stories</CardTitle>
+                  <CardDescription className="text-xs">
+                    {selectedNodeData?.name || "Selected song"} • {selectedStories.length} items
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <ScrollArea className="h-[60vh] pr-3">
+                    <div className="space-y-4">
+                      {selectedStories.map((story: any, index: number) => (
+                        <div key={`${story.title}-${index}`} className="space-y-2 border-b border-gray-800 pb-3 last:border-b-0">
+                          <div className="text-sm font-semibold">{story.title}</div>
+                          <div className="text-xs text-gray-300 leading-relaxed">{story.body}</div>
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-400">
+                            {story.source && <span>{story.source}</span>}
+                            {story.source_url && (
+                              <a
+                                href={story.source_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-blue-300 hover:text-blue-200 underline"
+                              >
+                                source
+                              </a>
+                            )}
+                            {Array.isArray(story.tags) && story.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {story.tags.slice(0, 4).map((tag: string) => (
+                                  <Badge key={tag} variant="outline" className="text-[10px] border-gray-600">
+                                    {tag}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {selectedArtistStories.length > 0 && (
+            <div className="absolute top-20 right-2 z-50 w-[360px] max-h-[80vh]">
+              <Card className="bg-black/90 border-gray-700 text-white">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Artist Stories</CardTitle>
+                  <CardDescription className="text-xs">
+                    {selectedNodeData?.name || "Selected artist"} • {selectedArtistStories.length} items
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <ScrollArea className="h-[60vh] pr-3">
+                    <div className="space-y-4">
+                      {selectedArtistStories.map((story: any, index: number) => (
+                        <div key={`${story.title}-${index}`} className="space-y-2 border-b border-gray-800 pb-3 last:border-b-0">
+                          <div className="text-sm font-semibold">{story.title}</div>
+                          <div className="text-xs text-gray-300 leading-relaxed">{story.body}</div>
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-400">
+                            {story.source && <span>{story.source}</span>}
+                            {story.source_url && (
+                              <a
+                                href={story.source_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-blue-300 hover:text-blue-200 underline"
+                              >
+                                source
+                              </a>
+                            )}
+                            {Array.isArray(story.tags) && story.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {story.tags.slice(0, 4).map((tag: string) => (
+                                  <Badge key={tag} variant="outline" className="text-[10px] border-gray-600">
+                                    {tag}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            </div>
+          )}
           {((graphData.nodes && graphData.links && graphData.nodes.length > 0) || 
             (graphData.triples && graphData.triples.length > 0)) ? (
             useEnhancedWebGPU ? (
@@ -748,6 +1045,11 @@ export default function Graph3DPage() {
                 jsonData={graphData} 
                 layoutType={layoutType}
                 highlightedNodes={highlightedNodes}
+                selectedNodeId={selectedNodeId || undefined}
+                onNodeSelect={handleNodeSelect}
+                onSelectionChange={handleSelectionChange}
+                focusTransitionMs={isTourActive ? TOUR_FOCUS_MS : undefined}
+                fitViewSignal={fitViewNonce}
                 enableClustering={enableClustering}
                 enableClusterColors={enableClusterColors}
                 clusteringMode="hybrid" // Default to Hybrid GPU/CPU mode
@@ -777,6 +1079,23 @@ export default function Graph3DPage() {
                 </p>
               </div>
             </div>
+          )}
+          <GraphLegend
+            nodes={Array.isArray(graphData?.nodes) ? graphData.nodes : []}
+            edges={Array.isArray(graphData?.edges) ? graphData.edges : []}
+            className="absolute bottom-2 right-2 z-50 max-w-[220px]"
+          />
+          <GraphChatPanel
+            graphData={graphData}
+            onTourStart={startTour}
+            tourSignal={tourSignal}
+            tourStepMs={TOUR_STEP_MS}
+          />
+          {(selectedNodes.length > 0 || selectedEdges.length > 0) && (
+            <GraphSelectionPanel
+              selectedNodes={selectedNodes}
+              selectedEdges={selectedEdges}
+            />
           )}
         </>
       )}

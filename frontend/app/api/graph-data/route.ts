@@ -70,9 +70,15 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const response = await fetch("http://localhost:5000/api/graph")
+    const { searchParams } = new URL(request.url)
+    const graphId = searchParams.get("graph_id") || searchParams.get("id")
+    const normalizedGraphId = graphId === "backend" ? null : graphId
+    const backendUrl = normalizedGraphId
+      ? `http://localhost:5000/api/graph?graph_id=${encodeURIComponent(normalizedGraphId)}`
+      : "http://localhost:5000/api/graph"
+    const response = await fetch(backendUrl)
     if (!response.ok) {
       const errorText = await response.text()
       throw new Error(`Backend responded with ${response.status}: ${errorText}`)

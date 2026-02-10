@@ -26,8 +26,8 @@ import { Slider } from "@/components/ui/slider"
 
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { FallbackGraph } from "@/components/fallback-graph"
 import { GraphVisualization } from "@/components/graph-visualization"
+import { GraphLegend } from "@/components/graph-legend"
 import { GraphToolbar } from "@/components/graph-toolbar"
 import { Triple, NodeDocument, EdgeDocument } from "@/types/graph"
 import {
@@ -57,20 +57,32 @@ type GraphData = {
   edges: Edge[]
 }
 
-export function KnowledgeGraphViewer() {
+type KnowledgeGraphViewerProps = {
+  graphId?: string
+  refreshToken?: number
+  isBuilding?: boolean
+}
+
+export function KnowledgeGraphViewer({ graphId, refreshToken, isBuilding }: KnowledgeGraphViewerProps) {
   const { documents } = useDocuments()
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], edges: [] })
-  const [isFullscreen, setIsFullscreen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [highlightedNodes, setHighlightedNodes] = useState<string[]>([])
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [layoutType, setLayoutType] = useState<"force" | "hierarchical" | "radial">("force")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [use3D, setUse3D] = useState(false)
   const [storedTriples, setStoredTriples] = useState<Triple[]>([])
+  const [storedGraphDocuments, setStoredGraphDocuments] = useState<{
+    nodes: NodeDocument[]
+    edges: EdgeDocument[]
+  } | null>(null)
   const [includeStoredTriples, setIncludeStoredTriples] = useState(true)
   const [loadingStoredTriples, setLoadingStoredTriples] = useState(false)
-  const graphContainerRef = useRef<HTMLDivElement>(null)
+  const [enrichJobId, setEnrichJobId] = useState<string | null>(null)
+  const [enrichStatus, setEnrichStatus] = useState<"idle" | "queued" | "running" | "ready" | "failed">("idle")
+  const [enrichError, setEnrichError] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   const normalizeKey = (value: string) => {
@@ -122,50 +134,33 @@ export function KnowledgeGraphViewer() {
     return { nodes, edges }
   }, [graphData.nodes, graphData.edges])
 
-  // Monitor fullscreen state changes
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-    };
-  }, []);
-
-  // Trigger rerender when fullscreen changes to ensure graph updates properly
-  useEffect(() => {
-    // A small timeout to ensure the graph has time to adjust
-    if (isFullscreen) {
-      const timer = setTimeout(() => {
-        // Dispatch a resize event to make sure canvas and component sizes are updated
-        window.dispatchEvent(new Event('resize'));
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [isFullscreen]);
-
   // Fetch stored triples from ArangoDB
   useEffect(() => {
     const fetchStoredTriples = async () => {
       if (!includeStoredTriples) {
         setStoredTriples([])
+        setStoredGraphDocuments(null)
         return
       }
 
       try {
         setLoadingStoredTriples(true)
-        const response = await fetch('/api/graph-db/triples')
+        const endpoint = graphId ? `/api/graph-db/triples?graph_id=${encodeURIComponent(graphId)}` : '/api/graph-db/triples'
+        const response = await fetch(endpoint)
         
         if (response.ok) {
           const data = await response.json()
           setStoredTriples(data.triples || [])
+          if (Array.isArray(data.nodes) && Array.isArray(data.edges)) {
+            setStoredGraphDocuments({ nodes: data.nodes, edges: data.edges })
+          } else {
+            setStoredGraphDocuments(null)
+          }
           console.log(`Loaded ${data.triples?.length || 0} stored triples from ArangoDB`)
         } else {
           console.warn('Failed to fetch stored triples:', response.statusText)
           setStoredTriples([])
+          setStoredGraphDocuments(null)
         }
       } catch (error) {
         console.error('Error fetching stored triples:', error)
@@ -176,7 +171,58 @@ export function KnowledgeGraphViewer() {
     }
 
     fetchStoredTriples()
-  }, [includeStoredTriples])
+  }, [includeStoredTriples, graphId, refreshKey, refreshToken])
+
+  const graphDocuments = useMemo(() => {
+    if (includeStoredTriples && storedGraphDocuments?.nodes?.length && storedGraphDocuments?.edges?.length) {
+      return storedGraphDocuments
+    }
+    return documentGraph
+  }, [includeStoredTriples, storedGraphDocuments, documentGraph])
+
+  useEffect(() => {
+    if (!enrichJobId) return
+
+    let isActive = true
+    let interval: ReturnType<typeof setInterval> | null = null
+
+    const pollStatus = async () => {
+      try {
+        const response = await fetch(`http://localhost:5000/api/playlist/status/${enrichJobId}`)
+        if (!response.ok) {
+          const text = await response.text()
+          throw new Error(text || `Status check failed: ${response.status}`)
+        }
+        const data = await response.json()
+        const status = data?.status as typeof enrichStatus
+        if (!isActive) return
+        setEnrichStatus(status || "running")
+
+        if (status === "ready") {
+          setRefreshKey((current) => current + 1)
+          if (interval) clearInterval(interval)
+          setEnrichJobId(null)
+        } else if (status === "failed") {
+          setEnrichError(data?.error || "Enrichment failed")
+          if (interval) clearInterval(interval)
+          setEnrichJobId(null)
+        }
+      } catch (err) {
+        if (!isActive) return
+        setEnrichError(err instanceof Error ? err.message : "Failed to check enrichment status")
+        setEnrichStatus("failed")
+        if (interval) clearInterval(interval)
+        setEnrichJobId(null)
+      }
+    }
+
+    interval = setInterval(pollStatus, 4000)
+    pollStatus()
+    return () => {
+      isActive = false
+      if (interval) clearInterval(interval)
+    }
+  }, [enrichJobId])
 
   // Generate combined graph data from all processed documents and stored triples
   useEffect(() => {
@@ -261,93 +307,68 @@ export function KnowledgeGraphViewer() {
   const handleSearch = () => {
     if (!searchTerm) {
       setHighlightedNodes([])
+      setSelectedNodeId(null)
       return
     }
     
     const lowerSearchTerm = searchTerm.toLowerCase()
-    const matches = graphData.nodes.filter(node => 
-      node.label.toLowerCase().includes(lowerSearchTerm)
-    ).map(node => node.id)
-    
-    setHighlightedNodes(matches)
-  }
-
-  const toggleFullscreen = () => {
-    if (!graphContainerRef.current) return;
-    
-    if (!document.fullscreenElement) {
-      // Enter fullscreen
-      graphContainerRef.current.requestFullscreen().catch(err => {
-        console.error(`Error attempting to enter fullscreen: ${err.message}`);
-      });
-    } else {
-      // Exit fullscreen
-      document.exitFullscreen().catch(err => {
-        console.error(`Error attempting to exit fullscreen: ${err.message}`);
-      });
+    const matches = graphDocuments.nodes.filter((node) => {
+      const name = node.name?.toLowerCase() || ""
+      const id = node._id?.toLowerCase() || ""
+      return name.includes(lowerSearchTerm) || id.includes(lowerSearchTerm)
+    })
+    if (matches.length === 0) {
+      setHighlightedNodes([])
+      setSelectedNodeId(null)
+      return
     }
-    // No need to set state here as the fullscreenchange event will handle it
+    const selected = matches[0]
+    setHighlightedNodes([selected._id])
+    setSelectedNodeId(selected._id)
   }
 
-  const toggleViewMode = () => {
-    if (!use3D) {
-      // Navigate to 3D view using stored triples from database
-      // This avoids large request headers by using the database instead of localStorage/URL
-      console.log('Switching to 3D view using stored triples from database');
-      
-      // Check if we have stored triples available
-      if (includeStoredTriples && storedTriples.length > 0) {
-        // Use stored triples from database - no need to pass data through browser
-        window.location.href = `/graph3d?source=stored&layout=${layoutType}`;
-      } else {
-        // Fallback: use current document triples, but try to store them in DB first
-        const currentTriples = getTriples();
-        
-        if (currentTriples.length > 0) {
-          // Try to store current triples in database first, then use stored source
-          fetch('/api/graph-db/triples', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              triples: currentTriples,
-              documentName: 'Current Graph View'
-            })
-          }).then(response => {
-            if (response.ok) {
-              console.log('Successfully stored current triples in database');
-              // Use stored triples source
-              window.location.href = `/graph3d?source=stored&layout=${layoutType}`;
-            } else {
-              console.warn('Failed to store triples in database, using fallback');
-              // Fallback to localStorage for small datasets only
-              if (currentTriples.length <= 100) {
-                const storageId = `graph_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-                try {
-                  localStorage.setItem(storageId, JSON.stringify(currentTriples));
-                  window.location.href = `/graph3d?source=local&storageId=${storageId}&layout=${layoutType}`;
-                } catch (storageError) {
-                  console.error("localStorage also failed:", storageError);
-                  window.location.href = `/graph3d?source=stored&layout=${layoutType}`;
-                }
-              } else {
-                // For large datasets, just use stored source (may be empty but won't cause header issues)
-                console.warn('Large dataset detected, using stored source to avoid header size limits');
-                window.location.href = `/graph3d?source=stored&layout=${layoutType}`;
-              }
-            }
-          }).catch(error => {
-            console.error('Error storing triples:', error);
-            // Fallback to stored source
-            window.location.href = `/graph3d?source=stored&layout=${layoutType}`;
-          });
-        } else {
-          // No triples available, use stored source
-          window.location.href = `/graph3d?source=stored&layout=${layoutType}`;
-        }
+  const openFullscreen3D = () => {
+    const params = new URLSearchParams()
+    params.set("layout", layoutType)
+    if (highlightedNodes.length > 0) {
+      params.set("highlightedNodes", JSON.stringify(highlightedNodes))
+    }
+    if (selectedNodeId) {
+      params.set("selectedNodeId", selectedNodeId)
+    }
+
+    if (graphId) {
+      params.set("id", graphId)
+      window.location.href = `/graph3d?${params.toString()}`
+      return
+    }
+
+    params.set("source", "stored")
+    window.location.href = `/graph3d?${params.toString()}`
+  }
+
+  const handleEnrich = async () => {
+    if (!graphId) return
+    setEnrichError(null)
+    setEnrichStatus("queued")
+    setEnrichJobId(null)
+
+    try {
+      const response = await fetch("http://localhost:5000/api/playlist/enrich", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ graph_id: graphId })
+      })
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(text || `Enrich request failed: ${response.status}`)
       }
-    } else {
-      // Toggle back to 2D
-      setUse3D(false);
+      const data = await response.json()
+      setEnrichJobId(data?.job_id || null)
+      setEnrichStatus("running")
+    } catch (error) {
+      setEnrichError(error instanceof Error ? error.message : "Failed to start enrichment")
+      setEnrichStatus("failed")
     }
   }
 
@@ -402,13 +423,8 @@ export function KnowledgeGraphViewer() {
   useKeyboardShortcuts([
     {
       key: 'f',
-      callback: toggleFullscreen,
-      description: 'Toggle fullscreen'
-    },
-    {
-      key: '3',
-      callback: toggleViewMode,
-      description: 'Toggle 3D view'
+      callback: openFullscreen3D,
+      description: 'Open 3D fullscreen'
     },
     {
       key: 'k',
@@ -432,16 +448,13 @@ export function KnowledgeGraphViewer() {
       callback: () => setLayoutType('radial'),
       description: 'Radial layout'
     }
-  ], !isFullscreen) // Disable shortcuts in fullscreen to avoid conflicts
+  ]) 
 
   return (
     <div className="space-y-4">
       {/* New Organized Toolbar */}
       <GraphToolbar
-        use3D={use3D}
-        onToggle3D={toggleViewMode}
-        isFullscreen={isFullscreen}
-        onToggleFullscreen={toggleFullscreen}
+        onToggleFullscreen={openFullscreen3D}
         layoutType={layoutType}
         onLayoutChange={setLayoutType}
         includeStoredTriples={includeStoredTriples}
@@ -455,14 +468,19 @@ export function KnowledgeGraphViewer() {
         searchInputRef={searchInputRef}
         nodeCount={graphData.nodes.length}
         edgeCount={graphData.edges.length}
+        onEnrich={handleEnrich}
+        enriching={enrichStatus === "queued" || enrichStatus === "running"}
+        enrichDisabled={!graphId || !!isBuilding}
       />
+      {enrichError && (
+        <div className="text-sm text-destructive">{enrichError}</div>
+      )}
       
       <div className="space-y-6">
           
           <div 
-            ref={graphContainerRef}
-            className={`overflow-hidden border border-border rounded-lg transition-all ${isFullscreen ? 'fixed inset-0 z-50 bg-background' : 'relative'}`}
-            style={{ height: isFullscreen ? '100vh' : '500px' }}
+            className="overflow-hidden border border-border rounded-lg transition-all relative"
+            style={{ height: '500px' }}
           >
             {loading ? (
               <div className="absolute inset-0 flex items-center justify-center">
@@ -479,20 +497,20 @@ export function KnowledgeGraphViewer() {
                   <p className="text-sm text-muted-foreground">Process documents to generate a knowledge graph</p>
                 </div>
               </div>
-            ) : use3D ? (
-              <GraphVisualization 
-                nodes={documentGraph.nodes}
-                edges={documentGraph.edges}
-                fullscreen={isFullscreen}
-                highlightedNodes={highlightedNodes}
-                layoutType={layoutType}
-                initialMode='3d'
-              />
             ) : (
-              <FallbackGraph 
-                nodes={documentGraph.nodes} 
-                edges={documentGraph.edges}
-                fullscreen={isFullscreen}
+              <GraphVisualization 
+                nodes={graphDocuments.nodes}
+                edges={graphDocuments.edges}
+                highlightedNodes={highlightedNodes}
+                selectedNodeId={selectedNodeId}
+                layoutType={layoutType}
+              />
+            )}
+            {!loading && (
+              <GraphLegend
+                nodes={graphDocuments.nodes}
+                edges={graphDocuments.edges}
+                className="absolute bottom-2 right-2 z-10 max-w-[220px]"
               />
             )}
           </div>

@@ -16,7 +16,7 @@
 //
 "use client"
 
-import { Download, Maximize, Minimize, CuboidIcon, LayoutGrid, Database, Search as SearchIcon, Settings, Zap, HelpCircle } from "lucide-react"
+import { Download, Maximize, LayoutGrid, Database, Search as SearchIcon, Settings, Zap, HelpCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
@@ -38,9 +38,6 @@ import {
 
 interface GraphToolbarProps {
   // View controls
-  use3D: boolean
-  onToggle3D: () => void
-  isFullscreen: boolean
   onToggleFullscreen: () => void
   
   // Layout controls
@@ -65,12 +62,14 @@ interface GraphToolbarProps {
   // Stats
   nodeCount: number
   edgeCount: number
+
+  // Enrichment
+  onEnrich: () => void
+  enriching: boolean
+  enrichDisabled: boolean
 }
 
 export function GraphToolbar({
-  use3D,
-  onToggle3D,
-  isFullscreen,
   onToggleFullscreen,
   layoutType,
   onLayoutChange,
@@ -84,7 +83,10 @@ export function GraphToolbar({
   onSearch,
   searchInputRef,
   nodeCount,
-  edgeCount
+  edgeCount,
+  onEnrich,
+  enriching,
+  enrichDisabled
 }: GraphToolbarProps) {
   return (
     <TooltipProvider>
@@ -97,33 +99,16 @@ export function GraphToolbar({
               <TooltipTrigger asChild>
                 <Button 
                   size="sm" 
-                  variant={use3D ? "default" : "outline"}
-                  onClick={onToggle3D}
-                  className={`${use3D ? 'bg-nvidia-green hover:bg-nvidia-green/90 text-white border-nvidia-green' : 'border-border hover:bg-muted/50 text-foreground'} px-3 py-2 gap-2`}
-                >
-                  <CuboidIcon className="h-4 w-4" />
-                  <span className="hidden sm:inline">{use3D ? '2D' : '3D'}</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                Switch to {use3D ? '2D' : '3D'} view
-              </TooltipContent>
-            </Tooltip>
-            
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button 
-                  size="sm" 
                   variant="outline" 
                   onClick={onToggleFullscreen}
                   className="px-3 py-2 gap-2"
                 >
-                  {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
-                  <span className="hidden sm:inline">{isFullscreen ? "Exit" : "Fullscreen"}</span>
+                  <Maximize className="h-4 w-4" />
+                  <span className="hidden sm:inline">Fullscreen</span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                {isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                Open 3D fullscreen
               </TooltipContent>
             </Tooltip>
           </div>
@@ -165,7 +150,7 @@ export function GraphToolbar({
           <Separator orientation="vertical" className="h-6 hidden md:block" />
 
           {/* Data Source Controls */}
-          <div className="flex items-center gap-2">
+          {/* <div className="flex items-center gap-2">
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="flex items-center gap-2">
@@ -189,15 +174,15 @@ export function GraphToolbar({
                 Include stored triples from database ({storedTriplesCount} available)
               </TooltipContent>
             </Tooltip>
-          </div>
+          </div> */}
 
           {/* Stats (on larger screens) */}
-          <div className="hidden lg:flex items-center gap-2 text-xs text-muted-foreground">
+          {/* <div className="hidden lg:flex items-center gap-2 text-xs text-muted-foreground">
             <Separator orientation="vertical" className="h-6" />
             <span>{nodeCount} nodes</span>
             <span>•</span>
             <span>{edgeCount} edges</span>
-          </div>
+          </div> */}
 
           {/* Search */}
           <div className="flex items-center gap-2 min-w-0">
@@ -206,7 +191,7 @@ export function GraphToolbar({
               <Input
                 ref={searchInputRef || undefined}
                 type="text"
-                placeholder="Search nodes... (Ctrl+K)"
+                placeholder="Find a node..."
                 value={searchTerm}
                 onChange={(e) => onSearchChange(e.target.value)}
                 onKeyDown={(e) => {
@@ -257,7 +242,7 @@ export function GraphToolbar({
             </DropdownMenu>
 
             {/* Help/Shortcuts */}
-            <Tooltip>
+            {/* <Tooltip>
               <TooltipTrigger asChild>
                 <Button 
                   size="sm" 
@@ -278,7 +263,7 @@ export function GraphToolbar({
                   <div className="flex justify-between"><span>Shift+3</span><span>Radial layout</span></div>
                 </div>
               </TooltipContent>
-            </Tooltip>
+            </Tooltip> */}
           </div>
         </div>
       </div>

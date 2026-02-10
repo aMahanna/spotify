@@ -9,7 +9,6 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "3d-force-graph": "^1.77.0",
     "@aws-sdk/client-s3": "^3.787.0",
     "@aws-sdk/s3-request-presigner": "^3.787.0",
     "@hookform/resolvers": "^3.9.1",
@@ -40,6 +39,7 @@
     "@tailwindcss/forms": "latest",
     "@types/d3": "^7.4.3",
     "@types/three": "^0.175.0",
+    "3d-force-graph": "^1.77.0",
     "arangojs": "^8.8.1",
     "autoprefixer": "^10.4.20",
     "axios": "^1.8.4",
@@ -55,7 +55,9 @@
     "react": "^19",
     "react-dom": "^19",
     "react-hook-form": "^7.54.1",
+    "react-markdown": "^10.1.0",
     "react-resizable-panels": "^2.1.7",
+    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.176.0",

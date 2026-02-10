@@ -66,7 +66,7 @@ Or use Docker (recommended):
 ./start.sh
 ```
 
-The production app will run on http://localhost:3001
+The production app will run on http://localhost:3000
 
 ## Environment Variables
 

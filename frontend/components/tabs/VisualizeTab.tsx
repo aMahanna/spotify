@@ -17,7 +17,13 @@
 import { KnowledgeGraphViewer } from "@/components/knowledge-graph-viewer"
 import { Eye } from "lucide-react"
 
-export function VisualizeTab() {
+type VisualizeTabProps = {
+  graphId?: string | null
+  refreshToken?: number
+  isBuilding?: boolean
+}
+
+export function VisualizeTab({ graphId, refreshToken, isBuilding }: VisualizeTabProps) {
   return (
     <div className="nvidia-build-card p-0 overflow-hidden">
       <div className="p-6 border-b border-border/10">
@@ -33,7 +39,11 @@ export function VisualizeTab() {
       </div>
       
       <div className="p-6">
-        <KnowledgeGraphViewer />
+        <KnowledgeGraphViewer
+          graphId={graphId || undefined}
+          refreshToken={refreshToken}
+          isBuilding={isBuilding}
+        />
       </div>
     </div>
   )

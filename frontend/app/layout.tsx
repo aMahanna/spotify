@@ -22,7 +22,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { DocumentProvider } from "@/contexts/document-context"
 import { ClientInitializer } from "@/components/client-init"
 import { NvidiaIcon } from "@/components/nvidia-icon"
-import { ThemeToggle } from "@/components/theme-toggle"
+// import { ThemeToggle } from "@/components/theme-toggle"
 import { Toaster } from "@/components/ui/toaster"
 
 const inter = Inter({
@@ -57,9 +57,9 @@ export default function RootLayout({
                     <span className="text-xl font-bold gradient-text">txt2kg</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-4">
+                {/* <div className="flex items-center gap-4">
                   <ThemeToggle />
-                </div>
+                </div> */}
               </div>
             </header>
             {children}
