@@ -90,7 +90,7 @@ export function GraphVisualization({
       // Add message listener for error communication
       window.addEventListener('message', handleIframeError);
       
-      const setupIframe = async () => {
+      const setupIframe = () => {
         try {
           // Get graph ID from URL if available
           const params = new URLSearchParams(window.location.search);
@@ -105,37 +105,10 @@ export function GraphVisualization({
             // If we have a graph ID, we can just pass that
             iframeSrc = `/graph3d?id=${graphId}${baseParams}`;
           } else {
-            const graphPayload = { nodes, edges }
-            const storageId = `graph_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`
-            try {
-              localStorage.setItem(storageId, JSON.stringify(graphPayload));
-              iframeSrc = `/graph3d?storageId=${storageId}${baseParams}`;
-            } catch (storageError: any) {
-              if (storageError?.name !== "QuotaExceededError") {
-                console.error("localStorage failed:", storageError);
-              }
-              try {
-                const response = await fetch("/api/graph-data", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ nodes, edges, documentName: "Embedded Graph" })
-                });
-                if (!response.ok) {
-                  const errorText = await response.text();
-                  throw new Error(errorText || "Failed to store graph data");
-                }
-                const result = await response.json();
-                if (result?.graphId) {
-                  iframeSrc = `/graph3d?id=${encodeURIComponent(result.graphId)}${baseParams}`;
-                } else {
-                  throw new Error("Missing graphId in response");
-                }
-              } catch (apiError) {
-                console.error("API storage failed:", apiError);
-                pendingGraphPayloadRef.current = graphPayload;
-                iframeSrc = `/graph3d?source=message${baseParams}`;
-              }
-            }
+            // For embedded graphs without a persisted graph ID, pass data directly
+            // to the iframe via postMessage once the frame has loaded.
+            pendingGraphPayloadRef.current = { nodes, edges };
+            iframeSrc = `/graph3d?source=message${baseParams}`;
           }
           
           // Set the iframe source

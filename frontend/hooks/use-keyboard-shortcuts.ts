@@ -64,14 +64,3 @@ export function useKeyboardShortcuts(shortcuts: KeyboardShortcut[], enabled: boo
     }
   }, [shortcuts, enabled])
 }
-
-// Common shortcut combinations
-export const shortcuts = {
-  toggleFullscreen: { key: 'f', description: 'Toggle fullscreen' },
-  toggle3D: { key: '3', description: 'Toggle 3D view' },
-  export: { key: 'e', ctrlKey: true, description: 'Export graph' },
-  search: { key: 'k', ctrlKey: true, description: 'Focus search' },
-  forceLayout: { key: '1', description: 'Force layout' },
-  hierarchicalLayout: { key: '2', description: 'Hierarchical layout' },
-  radialLayout: { key: '3', shiftKey: true, description: 'Radial layout' },
-} as const

@@ -54,22 +54,6 @@ const buildLinksFromEdges = (edges: any[]) => {
     .filter(Boolean) as { source: string; target: string; name: string }[]
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    const { nodes, edges, documentName } = await request.json()
-
-    if (!nodes || !Array.isArray(nodes) || !edges || !Array.isArray(edges)) {
-      return NextResponse.json({ error: "Invalid graph data" }, { status: 400 })
-    }
-
-    console.log(`Accepted graph data with ${nodes.length} nodes and ${edges.length} edges`)
-    return NextResponse.json({ graphId: "backend", documentName: documentName || "Backend Graph" })
-  } catch (error) {
-    console.error("Error storing graph data:", error)
-    return NextResponse.json({ error: "Failed to store graph data" }, { status: 500 })
-  }
-}
-
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)

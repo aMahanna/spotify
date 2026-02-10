@@ -49,11 +49,3 @@ export interface Story {
   source_url?: string
   tags?: string[]
 }
-
-// Add this interface to the file
-export interface VectorDBStats {
-  nodes: number;
-  relationships: number;
-  source: string;
-  httpHealthy?: boolean;
-} 

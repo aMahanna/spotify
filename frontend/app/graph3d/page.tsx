@@ -24,7 +24,7 @@
  * Usage:
  * 1. Stored triples: /graph3d?source=stored - Uses triples from the graph database (ArangoDB/Neo4j)
  * 2. URL triples: /graph3d?triples=[...] - Uses triples passed directly in URL parameters
- * 3. localStorage: /graph3d?storageId=xyz - Uses triples from browser localStorage
+ * 3. Message payload: /graph3d?source=message - Waits for graph payload from parent frame
  * 4. Sample data: /graph3d - Uses built-in sample data when no other source is available
  * 
  * Additional parameters:
@@ -33,7 +33,7 @@
  * 
  * Examples:
  * - /graph3d?source=stored&layout=force
- * - /graph3d?source=local&triples=[{"subject":"A","predicate":"relates_to","object":"B"}]
+ * - /graph3d?source=message&layout=force
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react"
@@ -410,7 +410,6 @@ export default function Graph3DPage() {
           hasTriples: false,
           hasNodes: false,
           hasEdges: false,
-          hasStorageId: false,
           layout: layoutParam || "default",
           highlightedNodes: highlightedNodesParam ? "provided" : "not provided",
           source: source || "auto",
