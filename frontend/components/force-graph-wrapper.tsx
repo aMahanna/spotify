@@ -2886,10 +2886,25 @@ export function ForceGraphWrapper({
       
       switch (layoutType) {
         case "hierarchical":
+          // Tree layout in ForceGraph requires a DAG. Real graph data can contain cycles,
+          // so handle DAG errors gracefully to avoid collapsing the render.
+          graphRef.current.onDagError((loopNodeIds: string[]) => {
+            console.warn(
+              "Tree layout detected cycles. Falling back to best-effort DAG rendering.",
+              loopNodeIds
+            );
+          });
           graphRef.current.dagMode("td");
+          if (graphRef.current.dagLevelDistance) {
+            graphRef.current.dagLevelDistance(120);
+          }
+          if (graphRef.current.d3Force) {
+            graphRef.current.d3Force("radial", null);
+          }
           break;
         case "radial":
           graphRef.current.dagMode(null);
+          graphRef.current.onDagError(undefined);
           // Apply radial force
           if (graphRef.current.d3Force) {
             graphRef.current.d3Force("radial", d3.forceRadial(100));
@@ -2898,6 +2913,7 @@ export function ForceGraphWrapper({
         case "force":
         default:
           graphRef.current.dagMode(null);
+          graphRef.current.onDagError(undefined);
           // Remove radial force if it exists
           if (graphRef.current.d3Force) {
             graphRef.current.d3Force("radial", null);
