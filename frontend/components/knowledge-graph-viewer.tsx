@@ -188,7 +188,7 @@ export function KnowledgeGraphViewer({ graphId, refreshToken, isBuilding }: Know
 
     const pollStatus = async () => {
       try {
-        const response = await fetch(`http://localhost:5000/api/playlist/status/${enrichJobId}`)
+        const response = await fetch(`/backend-api/playlist/status/${enrichJobId}`)
         if (!response.ok) {
           const text = await response.text()
           throw new Error(text || `Status check failed: ${response.status}`)
@@ -354,7 +354,7 @@ export function KnowledgeGraphViewer({ graphId, refreshToken, isBuilding }: Know
     setEnrichJobId(null)
 
     try {
-      const response = await fetch("http://localhost:5000/api/playlist/enrich", {
+      const response = await fetch("/backend-api/playlist/enrich", {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ graph_id: graphId })

@@ -34,7 +34,7 @@ export function VisualizeTab({ graphId, refreshToken, isBuilding }: VisualizeTab
           <h2 className="text-lg font-semibold text-foreground">Knowledge Graph Visualization</h2>
         </div>
         <p className="text-sm text-muted-foreground leading-relaxed">
-          Explore connections between entities and visualize your knowledge graph
+          Explore connections between entities and visualize your playlist.
         </p>
       </div>
       
