@@ -57,7 +57,7 @@ interface RenderingMode {
 
 export function WebGPU3DViewer({ 
   graphData, 
-  remoteServiceUrl = 'http://localhost:8083',
+  remoteServiceUrl = process.env.NEXT_PUBLIC_WEBGPU_REMOTE_SERVICE_URL || 'http://localhost:8083',
   enableClustering = true,
   onClusteringUpdate,
   onError 

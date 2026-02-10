@@ -70,6 +70,9 @@ const WebGPU3DViewer = dynamic(
   { ssr: false }
 )
 
+const WEBGPU_REMOTE_SERVICE_URL =
+  process.env.NEXT_PUBLIC_WEBGPU_REMOTE_SERVICE_URL || "http://localhost:8083"
+
 interface PerformanceMetrics {
   renderingTime: number
   clusteringTime?: number
@@ -1030,7 +1033,7 @@ export default function Graph3DPage() {
                   nodes: graphData.nodes,
                   links: graphData.links
                 } : null}
-                remoteServiceUrl="http://localhost:8083"
+                remoteServiceUrl={WEBGPU_REMOTE_SERVICE_URL}
                 enableClustering={enableClustering}
                 onClusteringUpdate={handleClusteringUpdate}
                 onError={(err) => {
@@ -1052,7 +1055,7 @@ export default function Graph3DPage() {
                 enableClustering={enableClustering}
                 enableClusterColors={enableClusterColors}
                 clusteringMode="hybrid" // Default to Hybrid GPU/CPU mode
-                remoteServiceUrl="http://localhost:8083"
+                remoteServiceUrl={WEBGPU_REMOTE_SERVICE_URL}
                 onClusteringUpdate={handleClusteringUpdate}
                 // Semantic clustering parameters
                 clusteringMethod={clusteringMethod}

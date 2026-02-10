@@ -352,7 +352,7 @@ export function ForceGraphWrapper({
   enableClustering = false, 
   enableClusterColors = false, 
   clusteringMode = 'hybrid', 
-  remoteServiceUrl = 'http://localhost:8083', 
+  remoteServiceUrl = process.env.NEXT_PUBLIC_WEBGPU_REMOTE_SERVICE_URL || 'http://localhost:8083', 
   onClusteringUpdate, 
   onError,
   // Semantic clustering parameters
