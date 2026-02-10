@@ -52,9 +52,9 @@ def enrich_artist(name: str, discogs_token: Optional[str] = None) -> dict:
         }
 
     session = http.build_session()
-    discogs_token = discogs_token or os.getenv(settings.DISCOGS_TOKEN_ENV)
-    lastfm_key = os.getenv(settings.LASTFM_API_KEY_ENV)
-    audiodb_key = os.getenv(settings.AUDIODB_API_KEY_ENV)
+    discogs_token = discogs_token or os.getenv(settings.DISCOGS_TOKEN)
+    lastfm_key = os.getenv(settings.LASTFM_API_KEY)
+    audiodb_key = os.getenv(settings.AUDIODB_API_KEY)
 
     genres: List[str] = []
     labels: List[str] = []

@@ -62,9 +62,9 @@ def enrich_song(
         }
 
     session = http.build_session()
-    genius_token = os.getenv(settings.GENIUS_ACCESS_TOKEN_ENV)
-    lastfm_key = os.getenv(settings.LASTFM_API_KEY_ENV)
-    audiodb_key = os.getenv(settings.AUDIODB_API_KEY_ENV)
+    genius_token = os.getenv(settings.GENIUS_ACCESS_TOKEN)
+    lastfm_key = os.getenv(settings.LASTFM_API_KEY)
+    audiodb_key = os.getenv(settings.AUDIODB_API_KEY)
 
     songwriters: List[str] = []
     producers: List[str] = []

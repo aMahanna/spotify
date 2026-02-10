@@ -72,7 +72,7 @@ The production app will run on http://localhost:3000
 
 Required environment variables are configured in docker-compose files:
 
-- `ARANGODB_URL`: ArangoDB connection URL
+- `ARANGOARANGO_DB_URL`: ArangoDB connection URL
 - `OLLAMA_BASE_URL`: Ollama API endpoint
 - `VLLM_BASE_URL`: vLLM API endpoint (optional)
 - `NVIDIA_API_KEY`: NVIDIA API key (optional)

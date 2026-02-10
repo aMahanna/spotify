@@ -8,10 +8,10 @@ from config import settings
 
 
 def get_db():
-    return ArangoClient(hosts=settings.DB_URL).db(
-        settings.DB_NAME,
-        username=settings.DB_USER,
-        password=settings.DB_PASSWORD,
+    return ArangoClient(hosts=settings.ARANGO_DB_URL).db(
+        settings.ARANGO_DB_NAME,
+        username=settings.ARANGO_USER,
+        password=settings.ARANGO_PASS,
     )
 
 

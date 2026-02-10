@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple
 import cityhash
 from spotify_scraper import SpotifyClient
 
-from artist_enrichment import enrich_artist, enrich_song
+from enrichment import enrich_artist, enrich_song
 from config import settings
 from db.client import ensure_collection, get_db
 from graph import schema
