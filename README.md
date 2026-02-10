@@ -6,6 +6,8 @@ Built in response to Spotify's push toward richer song context and contributor v
 - [Spotlighting the people, connections, and stories behind your music](https://artists.spotify.com/en/blog/spotlighting-the-people-connections-and-stories-behind-your-music)
 - [Introducing About the Song (beta)](https://newsroom.spotify.com/2026-02-06/about-the-song-beta/)
 
+UI was forked from the Text2KG NVIDIA Blueprint, which uses ArangoDB: https://www.youtube.com/watch?v=8iA_f_UpzHc
+
 ## How it works
 
 1. Paste a Spotify playlist URL in the app.
