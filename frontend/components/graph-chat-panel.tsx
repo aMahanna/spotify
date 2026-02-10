@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -46,13 +46,25 @@ export function GraphChatPanel({ graphData, onTourStart, tourSignal, tourStepMs 
   const dragOffsetRef = useRef<{ x: number; y: number } | null>(null)
   const tourTextBufferRef = useRef("")
   const tourLinesRef = useRef<string[]>([])
-  const pendingTourStepsRef = useRef(0)
+  const pendingTourStepNodeIdsRef = useRef<string[]>([])
   const tourResponseDoneRef = useRef(false)
   const tourTimeoutsRef = useRef<number[]>([])
   const tourTypingRef = useRef(false)
   const TOUR_END_BUFFER_MS = 600
   const TOUR_CHAR_MIN_MS = 4
   const TOUR_CHAR_MAX_MS = 18
+
+  const nodeNameLookup = useMemo(() => {
+    const lookup = new Map<string, string>()
+    const nodes = Array.isArray(graphData?.nodes) ? graphData.nodes : []
+    nodes.forEach((node: any) => {
+      const nodeId = String(node?.id || node?._id || node?.name || node?.label || "").trim()
+      if (!nodeId) return
+      const nodeName = String(node?.name || node?.label || nodeId).trim()
+      lookup.set(nodeId, nodeName)
+    })
+    return lookup
+  }, [graphData])
 
   const LoadingDots = () => (
     <span className="inline-flex items-center gap-0.5">
@@ -157,12 +169,46 @@ export function GraphChatPanel({ graphData, onTourStart, tourSignal, tourStepMs 
     })
   }
 
+  const normalizeForMatch = (value: string) =>
+    value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/^[\s>*-]*\d+[\).\s:-]*/g, "")
+      .replace(/[^\w\s/:.-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+
+  const lineMatchesNode = (line: string, nodeId: string, nodeName: string) => {
+    const normalizedLine = normalizeForMatch(line)
+    const normalizedName = normalizeForMatch(nodeName)
+    const normalizedId = normalizeForMatch(nodeId)
+    if (!normalizedLine) return false
+    if (normalizedName && normalizedLine.includes(normalizedName)) return true
+    return normalizedId ? normalizedLine.includes(normalizedId) : false
+  }
+
   const processTourQueue = () => {
     if (tourTypingRef.current) return
-    if (pendingTourStepsRef.current <= 0) return
+    if (pendingTourStepNodeIdsRef.current.length === 0) return
     if (tourLinesRef.current.length === 0) return
 
-    const nextLine = tourLinesRef.current.shift()
+    const currentNodeId = pendingTourStepNodeIdsRef.current[0]
+    const currentNodeName = nodeNameLookup.get(currentNodeId) || currentNodeId
+    const matchingLineIndex = tourLinesRef.current.findIndex((line) =>
+      lineMatchesNode(line, currentNodeId, currentNodeName)
+    )
+
+    let nextLine = ""
+    if (matchingLineIndex >= 0) {
+      nextLine = tourLinesRef.current.splice(matchingLineIndex, 1)[0] || ""
+    } else if (tourResponseDoneRef.current) {
+      // If the model didn't clearly anchor lines to node names, preserve timing by using next available line.
+      nextLine = tourLinesRef.current.shift() || ""
+    } else {
+      return
+    }
+
     if (!nextLine) return
 
     const availableMs = Math.max(600, tourStepMs - TOUR_END_BUFFER_MS)
@@ -185,7 +231,7 @@ export function GraphChatPanel({ graphData, onTourStart, tourSignal, tourStepMs 
       }
       appendAssistantDelta("\n")
       tourTypingRef.current = false
-      pendingTourStepsRef.current -= 1
+      pendingTourStepNodeIdsRef.current.shift()
       processTourQueue()
     }
 
@@ -196,8 +242,9 @@ export function GraphChatPanel({ graphData, onTourStart, tourSignal, tourStepMs 
     processTourQueue()
   }
 
-  const enqueueTourLine = () => {
-    pendingTourStepsRef.current += 1
+  const enqueueTourStep = (nodeId?: string) => {
+    if (!nodeId) return
+    pendingTourStepNodeIdsRef.current.push(nodeId)
     processTourQueue()
   }
 
@@ -220,7 +267,11 @@ export function GraphChatPanel({ graphData, onTourStart, tourSignal, tourStepMs 
     const isTour = questionId === "tour"
 
     setMessages((prev) => {
-      const next = [...prev, { role: "user", content: questionLabel }, { role: "assistant", content: "" }]
+      const next: ChatMessage[] = [
+        ...prev,
+        { role: "user", content: questionLabel },
+        { role: "assistant", content: "" },
+      ]
       assistantIndexRef.current = next.length - 1
       return next
     })
@@ -231,7 +282,7 @@ export function GraphChatPanel({ graphData, onTourStart, tourSignal, tourStepMs 
       if (isTour) {
         tourTextBufferRef.current = ""
         tourLinesRef.current = []
-        pendingTourStepsRef.current = 0
+        pendingTourStepNodeIdsRef.current = []
         tourResponseDoneRef.current = false
         tourTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId))
         tourTimeoutsRef.current = []
@@ -322,7 +373,7 @@ export function GraphChatPanel({ graphData, onTourStart, tourSignal, tourStepMs 
   useEffect(() => {
     if (!tourSignal) return
     if (tourSignal.type === "step") {
-      enqueueTourLine()
+      enqueueTourStep(tourSignal.nodeId)
       return
     }
     if (tourSignal.type === "done") {
