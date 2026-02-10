@@ -17,140 +17,42 @@
 "use client"
 
 import { useState, useEffect, useRef, useMemo } from "react"
-import { useDocuments } from "@/contexts/document-context"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
-import { Download, Maximize, Minimize, Search as SearchIcon, CuboidIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Slider } from "@/components/ui/slider"
-
-import { Switch } from "@/components/ui/switch"
-import { Label } from "@/components/ui/label"
 import { GraphVisualization } from "@/components/graph-visualization"
 import { GraphLegend } from "@/components/graph-legend"
 import { GraphToolbar } from "@/components/graph-toolbar"
-import { Triple, NodeDocument, EdgeDocument } from "@/types/graph"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-
-type Node = {
-  id: string
-  label: string
-  color?: string
-  size?: number
-  group?: string
-}
-
-type Edge = {
-  source: string
-  target: string
-  label: string
-  id: string
-}
-
-type GraphData = {
-  nodes: Node[]
-  edges: Edge[]
-}
+import { NodeDocument, EdgeDocument } from "@/types/graph"
 
 type KnowledgeGraphViewerProps = {
   graphId?: string
   refreshToken?: number
-  isBuilding?: boolean
 }
 
-export function KnowledgeGraphViewer({ graphId, refreshToken, isBuilding }: KnowledgeGraphViewerProps) {
-  const { documents } = useDocuments()
-  const [graphData, setGraphData] = useState<GraphData>({ nodes: [], edges: [] })
+export function KnowledgeGraphViewer({ graphId, refreshToken }: KnowledgeGraphViewerProps) {
   const [searchTerm, setSearchTerm] = useState("")
   const [highlightedNodes, setHighlightedNodes] = useState<string[]>([])
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [layoutType, setLayoutType] = useState<"force" | "hierarchical" | "radial">("force")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [storedTriples, setStoredTriples] = useState<Triple[]>([])
   const [storedGraphDocuments, setStoredGraphDocuments] = useState<{
     nodes: NodeDocument[]
     edges: EdgeDocument[]
   } | null>(null)
-  const [includeStoredTriples, setIncludeStoredTriples] = useState(true)
-  const [loadingStoredTriples, setLoadingStoredTriples] = useState(false)
-  const [enrichJobId, setEnrichJobId] = useState<string | null>(null)
-  const [enrichStatus, setEnrichStatus] = useState<"idle" | "queued" | "running" | "ready" | "failed">("idle")
-  const [enrichError, setEnrichError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
-  const normalizeKey = (value: string) => {
-    const normalized = value
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9_:-]/g, "_")
-      .replace(/^_+|_+$/g, "")
-    return normalized || "node"
-  }
-
-  const documentGraph = useMemo(() => {
-    const keyCounts = new Map<string, number>()
-    const nodeKeyMap = new Map<string, string>()
-    const nodes: NodeDocument[] = []
-    const edges: EdgeDocument[] = []
-
-    graphData.nodes.forEach((node) => {
-      const baseKey = normalizeKey(node.id)
-      const count = keyCounts.get(baseKey) || 0
-      const key = count === 0 ? baseKey : `${baseKey}_${count}`
-      keyCounts.set(baseKey, count + 1)
-
-      nodeKeyMap.set(node.id, key)
-      nodes.push({
-        _key: key,
-        _id: `nodes/${key}`,
-        name: node.label,
-        type: node.group
-      })
-    })
-
-    graphData.edges.forEach((edge, index) => {
-      const sourceKey = nodeKeyMap.get(edge.source)
-      const targetKey = nodeKeyMap.get(edge.target)
-      if (!sourceKey || !targetKey) return
-
-      const edgeKey = `e${index + 1}`
-      edges.push({
-        _key: edgeKey,
-        _id: `edges/${edgeKey}`,
-        _from: `nodes/${sourceKey}`,
-        _to: `nodes/${targetKey}`,
-        label: edge.label,
-        type: edge.id
-      })
-    })
-
-    return { nodes, edges }
-  }, [graphData.nodes, graphData.edges])
-
-  // Fetch stored triples from ArangoDB
+  // Fetch graph data from ArangoDB
   useEffect(() => {
-    const fetchStoredTriples = async () => {
-      if (!includeStoredTriples) {
-        setStoredTriples([])
-        setStoredGraphDocuments(null)
-        return
-      }
-
+    const fetchGraphDocuments = async () => {
       try {
-        setLoadingStoredTriples(true)
+        setLoading(true)
+        setError(null)
         const endpoint = graphId ? `/api/graph-db/triples?graph_id=${encodeURIComponent(graphId)}` : '/api/graph-db/triples'
         const response = await fetch(endpoint)
         
         if (response.ok) {
           const data = await response.json()
-          setStoredTriples(data.triples || [])
           if (Array.isArray(data.nodes) && Array.isArray(data.edges)) {
             setStoredGraphDocuments({ nodes: data.nodes, edges: data.edges })
           } else {
@@ -159,150 +61,42 @@ export function KnowledgeGraphViewer({ graphId, refreshToken, isBuilding }: Know
           console.log(`Loaded ${data.triples?.length || 0} stored triples from ArangoDB`)
         } else {
           console.warn('Failed to fetch stored triples:', response.statusText)
-          setStoredTriples([])
           setStoredGraphDocuments(null)
+          setError("Failed to load graph data.")
         }
       } catch (error) {
         console.error('Error fetching stored triples:', error)
-        setStoredTriples([])
+        setStoredGraphDocuments(null)
+        setError("Failed to load graph data.")
       } finally {
-        setLoadingStoredTriples(false)
+        setLoading(false)
       }
     }
 
-    fetchStoredTriples()
-  }, [includeStoredTriples, graphId, refreshKey, refreshToken])
+    fetchGraphDocuments()
+  }, [graphId, refreshKey, refreshToken])
 
   const graphDocuments = useMemo(() => {
-    if (includeStoredTriples && storedGraphDocuments?.nodes?.length && storedGraphDocuments?.edges?.length) {
+    if (storedGraphDocuments?.nodes?.length && storedGraphDocuments?.edges?.length) {
       return storedGraphDocuments
     }
-    return documentGraph
-  }, [includeStoredTriples, storedGraphDocuments, documentGraph])
+    return { nodes: [], edges: [] }
+  }, [storedGraphDocuments])
 
-  useEffect(() => {
-    if (!enrichJobId) return
-
-    let isActive = true
-    let interval: ReturnType<typeof setInterval> | null = null
-
-    const pollStatus = async () => {
-      try {
-        const response = await fetch(`/backend-api/playlist/status/${enrichJobId}`)
-        if (!response.ok) {
-          const text = await response.text()
-          throw new Error(text || `Status check failed: ${response.status}`)
-        }
-        const data = await response.json()
-        const status = data?.status as typeof enrichStatus
-        if (!isActive) return
-        setEnrichStatus(status || "running")
-
-        if (status === "ready") {
-          setRefreshKey((current) => current + 1)
-          if (interval) clearInterval(interval)
-          setEnrichJobId(null)
-        } else if (status === "failed") {
-          setEnrichError(data?.error || "Enrichment failed")
-          if (interval) clearInterval(interval)
-          setEnrichJobId(null)
-        }
-      } catch (err) {
-        if (!isActive) return
-        setEnrichError(err instanceof Error ? err.message : "Failed to check enrichment status")
-        setEnrichStatus("failed")
-        if (interval) clearInterval(interval)
-        setEnrichJobId(null)
-      }
-    }
-
-    interval = setInterval(pollStatus, 4000)
-    pollStatus()
-    return () => {
-      isActive = false
-      if (interval) clearInterval(interval)
-    }
-  }, [enrichJobId])
-
-  // Generate combined graph data from all processed documents and stored triples
-  useEffect(() => {
-    try {
-      setLoading(true)
-      
-      const allNodes: Node[] = []
-      const allEdges: Edge[] = []
-      const nodeMap = new Map<string, Node>()
-      
-      // Helper function to process triples and add to graph
-      const processTriples = (triples: Triple[], source: "document" | "stored") => {
-        triples.forEach(triple => {
-          // Add subject node if doesn't exist
-          if (!nodeMap.has(triple.subject)) {
-            const subjectNode: Node = {
-              id: triple.subject,
-              label: triple.subject,
-              group: source === "stored" ? "stored-subject" : "subject"
-            }
-            nodeMap.set(triple.subject, subjectNode)
-            allNodes.push(subjectNode)
-          }
-          
-          // Add object node if doesn't exist
-          if (!nodeMap.has(triple.object)) {
-            const objectNode: Node = {
-              id: triple.object,
-              label: triple.object,
-              group: source === "stored" ? "stored-object" : "object"
-            }
-            nodeMap.set(triple.object, objectNode)
-            allNodes.push(objectNode)
-          }
-          
-          // Add edge
-          const edgeId = `${source}-${triple.subject}-${triple.predicate}-${triple.object}`
-          allEdges.push({
-            id: edgeId,
-            source: triple.subject,
-            target: triple.object,
-            label: triple.predicate
-          })
-        })
-      }
-      
-      // Process all documents with triples
-      documents
-        .filter(doc => doc.status === "Processed" && doc.triples && doc.triples.length > 0)
-        .forEach(doc => {
-          if (!doc.triples) return
-          processTriples(doc.triples, "document")
-        })
-      
-      // Process stored triples if enabled
-      if (includeStoredTriples && storedTriples.length > 0) {
-        processTriples(storedTriples, "stored")
-      }
-      
-      setGraphData({ nodes: allNodes, edges: allEdges })
-      setError(null)
-    } catch (err) {
-      console.error("Error generating graph data:", err)
-      setError("Failed to generate knowledge graph visualization.")
-    } finally {
-      setLoading(false)
-    }
-  }, [documents, storedTriples, includeStoredTriples])
-
-  // Convert graph data to triples format for FallbackGraph
-  const getTriples = (): Triple[] => {
-    if (!graphData || !graphData.edges) {
-      return [];
-    }
-    return graphData.edges.map(edge => ({
-      subject: edge.source,
-      predicate: edge.label,
-      object: edge.target
+  const graphData = useMemo(() => {
+    const nodes = graphDocuments.nodes.map((node) => ({
+      id: node._id,
+      label: node.name,
+      group: node.type,
     }))
-  }
+    const edges = graphDocuments.edges.map((edge) => ({
+      id: edge._id || edge._key,
+      source: edge._from,
+      target: edge._to,
+      label: edge.label,
+    }))
+    return { nodes, edges }
+  }, [graphDocuments])
 
   const handleSearch = () => {
     if (!searchTerm) {
@@ -345,31 +139,6 @@ export function KnowledgeGraphViewer({ graphId, refreshToken, isBuilding }: Know
 
     params.set("source", "stored")
     window.location.href = `/graph3d?${params.toString()}`
-  }
-
-  const handleEnrich = async () => {
-    if (!graphId) return
-    setEnrichError(null)
-    setEnrichStatus("queued")
-    setEnrichJobId(null)
-
-    try {
-      const response = await fetch("/backend-api/playlist/enrich", {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ graph_id: graphId })
-      })
-      if (!response.ok) {
-        const text = await response.text()
-        throw new Error(text || `Enrich request failed: ${response.status}`)
-      }
-      const data = await response.json()
-      setEnrichJobId(data?.job_id || null)
-      setEnrichStatus("running")
-    } catch (error) {
-      setEnrichError(error instanceof Error ? error.message : "Failed to start enrichment")
-      setEnrichStatus("failed")
-    }
   }
 
   const exportGraph = (format: "json" | "csv" | "png") => {
@@ -457,24 +226,12 @@ export function KnowledgeGraphViewer({ graphId, refreshToken, isBuilding }: Know
         onToggleFullscreen={openFullscreen3D}
         layoutType={layoutType}
         onLayoutChange={setLayoutType}
-        includeStoredTriples={includeStoredTriples}
-        onToggleStoredTriples={setIncludeStoredTriples}
-        storedTriplesCount={storedTriples.length}
-        loadingStoredTriples={loadingStoredTriples}
         onExport={exportGraph}
         searchTerm={searchTerm}
         onSearchChange={setSearchTerm}
         onSearch={handleSearch}
         searchInputRef={searchInputRef}
-        nodeCount={graphData.nodes.length}
-        edgeCount={graphData.edges.length}
-        onEnrich={handleEnrich}
-        enriching={enrichStatus === "queued" || enrichStatus === "running"}
-        enrichDisabled={!graphId || !!isBuilding}
       />
-      {enrichError && (
-        <div className="text-sm text-destructive">{enrichError}</div>
-      )}
       
       <div className="space-y-6">
           
@@ -494,7 +251,7 @@ export function KnowledgeGraphViewer({ graphId, refreshToken, isBuilding }: Know
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center">
                   <p className="mb-2">No knowledge graph data available</p>
-                  <p className="text-sm text-muted-foreground">Process documents to generate a knowledge graph</p>
+                  <p className="text-sm text-muted-foreground">Build or select a playlist graph to visualize.</p>
                 </div>
               </div>
             ) : (

@@ -19,7 +19,6 @@ import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
-import { DocumentProvider } from "@/contexts/document-context"
 import { ClientInitializer } from "@/components/client-init"
 import { ArangoDbIcon, SpotifyIcon } from "@/components/brand-logos"
 import { Toaster } from "@/components/ui/toaster"
@@ -45,25 +44,23 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning className={inter.variable}>
       <body className={inter.className}>
         <ThemeProvider defaultTheme="dark">
-          <DocumentProvider>
-            <ClientInitializer />
-            {/* Modern Gradient Header */}
-            <header className="border-b border-border/50 backdrop-blur-md dark:bg-background/95 bg-background sticky top-0 z-50 shadow-sm">
-              <div className="container mx-auto px-4 py-3 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <ArangoDbIcon className="h-8 w-8" />
-                    <SpotifyIcon className="h-8 w-8" />
-                  </div>
-                  <div>
-                    <span className="text-xl font-bold gradient-text">SpotifyKG</span>
-                  </div>
+          <ClientInitializer />
+          {/* Modern Gradient Header */}
+          <header className="border-b border-border/50 backdrop-blur-md dark:bg-background/95 bg-background sticky top-0 z-50 shadow-sm">
+            <div className="container mx-auto px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <ArangoDbIcon className="h-8 w-8" />
+                  <SpotifyIcon className="h-8 w-8" />
+                </div>
+                <div>
+                  <span className="text-xl font-bold gradient-text">SpotifyKG</span>
                 </div>
               </div>
-            </header>
-            {children}
-            <Toaster />
-          </DocumentProvider>
+            </div>
+          </header>
+          {children}
+          <Toaster />
         </ThemeProvider>
       </body>
     </html>

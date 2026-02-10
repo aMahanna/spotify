@@ -16,10 +16,8 @@
 //
 "use client"
 
-import { Download, Maximize, LayoutGrid, Database, Search as SearchIcon, Settings, Zap, HelpCircle } from "lucide-react"
+import { Download, Maximize, Search as SearchIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
-import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -44,12 +42,6 @@ interface GraphToolbarProps {
   layoutType: "force" | "hierarchical" | "radial"
   onLayoutChange: (layout: "force" | "hierarchical" | "radial") => void
   
-  // Data controls
-  includeStoredTriples: boolean
-  onToggleStoredTriples: (enabled: boolean) => void
-  storedTriplesCount: number
-  loadingStoredTriples: boolean
-  
   // Export
   onExport: (format: "json" | "csv" | "png") => void
   
@@ -58,35 +50,18 @@ interface GraphToolbarProps {
   onSearchChange: (term: string) => void
   onSearch: () => void
   searchInputRef?: React.RefObject<HTMLInputElement | null>
-  
-  // Stats
-  nodeCount: number
-  edgeCount: number
 
-  // Enrichment
-  onEnrich: () => void
-  enriching: boolean
-  enrichDisabled: boolean
 }
 
 export function GraphToolbar({
   onToggleFullscreen,
   layoutType,
   onLayoutChange,
-  includeStoredTriples,
-  onToggleStoredTriples,
-  storedTriplesCount,
-  loadingStoredTriples,
   onExport,
   searchTerm,
   onSearchChange,
   onSearch,
-  searchInputRef,
-  nodeCount,
-  edgeCount,
-  onEnrich,
-  enriching,
-  enrichDisabled
+  searchInputRef
 }: GraphToolbarProps) {
   return (
     <TooltipProvider>
@@ -148,41 +123,6 @@ export function GraphToolbar({
           </div>
 
           <Separator orientation="vertical" className="h-6 hidden md:block" />
-
-          {/* Data Source Controls */}
-          {/* <div className="flex items-center gap-2">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="stored-triples"
-                    checked={includeStoredTriples}
-                    onCheckedChange={onToggleStoredTriples}
-                    size="sm"
-                  />
-                  <Label 
-                    htmlFor="stored-triples" 
-                    className="text-xs font-medium cursor-pointer flex items-center gap-1"
-                  >
-                    <Database className="h-3 w-3 text-nvidia-green" />
-                    <span className="hidden sm:inline">DB ({storedTriplesCount})</span>
-                    {loadingStoredTriples && <span className="animate-spin text-nvidia-green">⟳</span>}
-                  </Label>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                Include stored triples from database ({storedTriplesCount} available)
-              </TooltipContent>
-            </Tooltip>
-          </div> */}
-
-          {/* Stats (on larger screens) */}
-          {/* <div className="hidden lg:flex items-center gap-2 text-xs text-muted-foreground">
-            <Separator orientation="vertical" className="h-6" />
-            <span>{nodeCount} nodes</span>
-            <span>•</span>
-            <span>{edgeCount} edges</span>
-          </div> */}
 
           {/* Search */}
           <div className="flex items-center gap-2 min-w-0">

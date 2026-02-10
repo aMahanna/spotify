@@ -20,10 +20,9 @@ import { Eye } from "lucide-react"
 type VisualizeTabProps = {
   graphId?: string | null
   refreshToken?: number
-  isBuilding?: boolean
 }
 
-export function VisualizeTab({ graphId, refreshToken, isBuilding }: VisualizeTabProps) {
+export function VisualizeTab({ graphId, refreshToken }: VisualizeTabProps) {
   return (
     <div className="nvidia-build-card p-0 overflow-hidden">
       <div className="p-6 border-b border-border/10">
@@ -42,7 +41,6 @@ export function VisualizeTab({ graphId, refreshToken, isBuilding }: VisualizeTab
         <KnowledgeGraphViewer
           graphId={graphId || undefined}
           refreshToken={refreshToken}
-          isBuilding={isBuilding}
         />
       </div>
     </div>

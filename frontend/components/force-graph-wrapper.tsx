@@ -17,7 +17,7 @@
 "use client"
 
 import React, { useEffect, useRef, useState, useCallback } from "react"
-import type { Triple } from "@/utils/text-processing"
+import type { Triple } from "@/types/graph"
 import { Maximize2, Minimize2, Pause, Play, RefreshCw, ZoomIn, X, LayoutGrid } from "lucide-react"
 import { WebGPUClusteringEngine } from "@/utils/webgpu-clustering"
 import { getEdgeColor, getNodeColor } from "@/lib/collection-colors"
