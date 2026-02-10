@@ -26,7 +26,6 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --omit=dev
 
 COPY --from=frontend-builder /app/frontend/.next ./.next
-COPY --from=frontend-builder /app/frontend/public ./public
 COPY --from=frontend-builder /app/frontend/next.config.mjs ./next.config.mjs
 
 WORKDIR /app
