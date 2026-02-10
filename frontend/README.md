@@ -1,6 +1,6 @@
 # Frontend Application
 
-This directory contains the Next.js frontend application for the txt2kg project.
+This directory contains the Next.js frontend application for the SpotifyKG project.
 
 ## Structure
 

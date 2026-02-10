@@ -22,7 +22,7 @@ const getS3Config = () => {
   return {
     endpoint: process.env.S3_ENDPOINT || 'http://localhost:9000',
     region: process.env.S3_REGION || 'us-east-1',
-    bucket: process.env.S3_BUCKET || 'txt2kg',
+    bucket: process.env.S3_BUCKET || 'SpotifyKG',
     credentials: {
       accessKeyId: process.env.S3_ACCESS_KEY || 'minioadmin',
       secretAccessKey: process.env.S3_SECRET_KEY || 'minioadmin'

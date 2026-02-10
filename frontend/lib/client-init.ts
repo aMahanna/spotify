@@ -38,7 +38,7 @@ export function initializeDefaultSettings() {
   }
 
   if (!localStorage.getItem('arango_db')) {
-    localStorage.setItem('arango_db', 'txt2kg');
+    localStorage.setItem('arango_db', 'SpotifyKG');
   }
   
   // Set default Neo4j settings

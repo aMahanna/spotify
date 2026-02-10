@@ -1,6 +1,6 @@
 /**
  * Text processing utilities for knowledge graph extraction
- * Matches PyTorch Geometric's txt2kg.py implementation
+ * Matches the PyTorch Geometric reference implementation
  */
 
 import type { Triple } from '@/types/graph'

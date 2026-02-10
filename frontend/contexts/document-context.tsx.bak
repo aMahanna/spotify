@@ -61,7 +61,7 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isInitialized) {
       try {
-        const savedDocuments = localStorage.getItem('txt2kg_documents')
+        const savedDocuments = localStorage.getItem('SpotifyKG_documents')
         if (savedDocuments) {
           const parsedDocuments = JSON.parse(savedDocuments)
           
@@ -121,11 +121,11 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
             };
           });
           
-          localStorage.setItem('txt2kg_documents', JSON.stringify(documentsToSave));
+          localStorage.setItem('SpotifyKG_documents', JSON.stringify(documentsToSave));
           console.log(`Saved ${documents.length} documents to localStorage`);
         } else {
           // Clear localStorage if documents array is empty
-          localStorage.removeItem('txt2kg_documents');
+          localStorage.removeItem('SpotifyKG_documents');
           console.log('Cleared documents from localStorage');
         }
       } catch (error) {

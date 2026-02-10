@@ -25,5 +25,5 @@ AUDIODB_API_KEY_ENV = "THEAUDIODB_API_KEY"
 
 DEFAULT_TIMEOUT = 10
 DEFAULT_HEADERS = {
-    "User-Agent": "txt2kg/1.0 (https://github.com)",
+    "User-Agent": "SpotifyKG/1.0 (https://github.com)",
 }

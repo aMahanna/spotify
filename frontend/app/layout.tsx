@@ -21,7 +21,7 @@ import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { DocumentProvider } from "@/contexts/document-context"
 import { ClientInitializer } from "@/components/client-init"
-import { NvidiaIcon } from "@/components/nvidia-icon"
+import { ArangoDbIcon, SpotifyIcon } from "@/components/brand-logos"
 // import { ThemeToggle } from "@/components/theme-toggle"
 import { Toaster } from "@/components/ui/toaster"
 
@@ -32,8 +32,8 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: "txt2kg | NVIDIA Knowledge Graph Builder",
-  description: "Convert text documents to knowledge graphs using NVIDIA AI",
+  title: "SpotifyKG | Spotify + ArangoDB Knowledge Graph Builder",
+  description: "Convert Spotify playlist data into ArangoDB knowledge graphs",
     generator: 'v0.dev'
 }
 
@@ -52,9 +52,12 @@ export default function RootLayout({
             <header className="border-b border-border/50 backdrop-blur-md dark:bg-background/95 bg-background sticky top-0 z-50 shadow-sm">
               <div className="container mx-auto px-4 py-3 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <NvidiaIcon className="h-8 w-8" />
+                  <div className="flex items-center gap-2">
+                    <ArangoDbIcon className="h-8 w-8" />
+                    <SpotifyIcon className="h-8 w-8" />
+                  </div>
                   <div>
-                    <span className="text-xl font-bold gradient-text">txt2kg</span>
+                    <span className="text-xl font-bold gradient-text">SpotifyKG</span>
                   </div>
                 </div>
                 {/* <div className="flex items-center gap-4">

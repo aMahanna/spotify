@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# txt2kg-minimal start script
+# SpotifyKG start script
 # Runs both Python backend and React frontend
 
 set -e
@@ -73,7 +73,7 @@ cd ..
 
 echo ""
 echo "=========================================="
-echo "txt2kg-minimal is running!"
+echo "SpotifyKG is running!"
 echo "=========================================="
 echo ""
 echo "  Backend:  http://localhost:5000"

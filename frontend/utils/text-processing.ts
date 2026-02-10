@@ -16,7 +16,7 @@
 //
 /**
  * Text processing utilities for knowledge graph extraction
- * Matches PyTorch Geometric's txt2kg.py implementation
+ * Matches the PyTorch Geometric reference implementation
  */
 
 import type { Triple } from '@/types/graph'
@@ -26,7 +26,7 @@ const OVERLAP_SIZE = 1000 // For context preservation between chunks
 
 /**
  * Chunks text using PyTorch Geometric's exact chunking algorithm
- * Replicates the chunk_text function from PyG's txt2kg.py
+ * Replicates the chunk_text function from the PyG reference implementation
  */
 export function chunkTextPyG(text: string, chunkSize: number = 512, overlapSize: number = 0): string[] {
   if (!text) {
@@ -283,7 +283,7 @@ export function triplesToGraph(triples: Triple[]) {
 
 /**
  * Processes text using PyTorch Geometric's exact chunking method (no overlap)
- * Replicates the chunking behavior from PyG's txt2kg.py
+ * Replicates the chunking behavior from the PyG reference implementation
  * @param text Text to process
  * @param extractTriplesFn Function to extract triples from a chunk
  * @param chunkSize Maximum size of each chunk (default: 512 like PyG)
