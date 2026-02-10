@@ -6,6 +6,8 @@ import os
 
 DB_NAME = os.getenv("DB_NAME", "spotify")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "test")
+DB_URL = os.getenv("ARANGO_DB_URL", os.getenv("DB_URL", "http://127.0.0.1:8529"))
+DB_USER = os.getenv("ARANGO_USER", os.getenv("DB_USER", "root"))
 
 PLAYLIST_NAME_FALLBACK = os.getenv("PLAYLIST_NAME_FALLBACK", "playlist")
 GRAPH_NAME_PREFIX = os.getenv("GRAPH_NAME_PREFIX", "spotify_kg")

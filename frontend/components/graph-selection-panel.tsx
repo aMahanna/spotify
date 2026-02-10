@@ -36,7 +36,7 @@ export function GraphSelectionPanel({ selectedNodes, selectedEdges }: GraphSelec
     setIsStreaming(true)
 
     try {
-      const response = await fetch("http://localhost:5000/api/chat/stream", {
+      const response = await fetch("/backend-api/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

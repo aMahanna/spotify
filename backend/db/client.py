@@ -8,7 +8,11 @@ from config import settings
 
 
 def get_db():
-    return ArangoClient().db(settings.DB_NAME, password=settings.DB_PASSWORD)
+    return ArangoClient(hosts=settings.DB_URL).db(
+        settings.DB_NAME,
+        username=settings.DB_USER,
+        password=settings.DB_PASSWORD,
+    )
 
 
 def ensure_collection(db, name: str, *, edge: bool = False) -> None:

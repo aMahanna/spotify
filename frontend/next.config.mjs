@@ -20,6 +20,14 @@ const nextConfig = {
   env: {
     NVIDIA_API_KEY: process.env.NVIDIA_API_KEY,
   },
+  async rewrites() {
+    return [
+      {
+        source: "/backend-api/:path*",
+        destination: "http://127.0.0.1:5000/api/:path*",
+      },
+    ]
+  },
   // Remove API route timeout limits for large model processing
   serverRuntimeConfig: {
     // No duration limit - let large models complete naturally

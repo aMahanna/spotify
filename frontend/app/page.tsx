@@ -72,7 +72,7 @@ export default function Home() {
 
     const pollStatus = async () => {
       try {
-        const response = await fetch(`http://localhost:5000/api/playlist/status/${jobId}`)
+        const response = await fetch(`/backend-api/playlist/status/${jobId}`)
         if (!response.ok) {
           const text = await response.text()
           throw new Error(text || `Status check failed: ${response.status}`)
@@ -119,7 +119,7 @@ export default function Home() {
 
     const pollStatus = async () => {
       try {
-        const response = await fetch(`http://localhost:5000/api/playlist/status/${enrichJobId}`)
+        const response = await fetch(`/backend-api/playlist/status/${enrichJobId}`)
         if (!response.ok) {
           const text = await response.text()
           throw new Error(text || `Status check failed: ${response.status}`)
@@ -161,7 +161,7 @@ export default function Home() {
   useEffect(() => {
     const loadPlaylists = async () => {
       try {
-        const response = await fetch("http://localhost:5000/api/playlists")
+        const response = await fetch("/backend-api/playlists")
         if (!response.ok) return
         const data = await response.json()
         const playlists = Array.isArray(data?.playlists) ? data.playlists : []
@@ -197,7 +197,7 @@ export default function Home() {
     setJobGraphId(null)
 
     try {
-      const response = await fetch("http://localhost:5000/api/playlist/build", {
+      const response = await fetch("/backend-api/playlist/build", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ playlist_url: playlistUrl })
@@ -241,7 +241,7 @@ export default function Home() {
     setEnrichJobId(null)
 
     try {
-      const response = await fetch("http://localhost:5000/api/playlist/enrich", {
+      const response = await fetch("/backend-api/playlist/enrich", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ graph_id: effectiveGraphId })
