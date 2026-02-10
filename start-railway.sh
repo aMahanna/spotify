@@ -12,4 +12,4 @@ cleanup() {
 trap cleanup INT TERM
 
 cd /app/frontend
-exec npm run start -- --hostname 0.0.0.0 --port "${PORT:-3000}"
+HOSTNAME=0.0.0.0 PORT="${PORT:-3000}" exec node /app/frontend/server.js

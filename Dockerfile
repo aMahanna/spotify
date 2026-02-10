@@ -22,11 +22,8 @@ COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip3 install --no-cache-dir --break-system-packages -r ./backend/requirements.txt gunicorn
 
 WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci --omit=dev
-
-COPY --from=frontend-builder /app/frontend/.next ./.next
-COPY --from=frontend-builder /app/frontend/next.config.mjs ./next.config.mjs
+COPY --from=frontend-builder /app/frontend/.next/standalone ./
+COPY --from=frontend-builder /app/frontend/.next/static ./.next/static
 
 WORKDIR /app
 COPY backend ./backend
