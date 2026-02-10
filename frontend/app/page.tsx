@@ -265,7 +265,7 @@ export default function Home() {
           <div>
             <h1 className="text-2xl font-bold">SpotifyKG</h1>
             <p className="text-sm text-muted-foreground">
-              Visualization, clustering, and navigation powered by the backend graph.
+              Playlist visualization, clustering, and navigation powered by ArangoDB & GenAI.
             </p>
           </div>
         </div>
@@ -354,7 +354,7 @@ export default function Home() {
                 className="pointer-events-none absolute left-1/2 z-10 mt-2 -translate-x-1/2 rounded bg-gray-900 px-3 py-1 text-xs text-white opacity-0 group-hover:opacity-100 transition-opacity min-w-max"
                 role="tooltip"
               >
-                Fetches additional artist and track metadata for the selected playlist graph from Wikidata, MusicBrainz, Wikipedia, and (when API keys are set) Discogs, Last.fm, Genius, and TheAudioDB. This process may take a few minutes.
+                Contextualizes your playlist as graph using Wikidata, MusicBrainz, Wikipedia, Discogs, Last.fm, Genius, and TheAudioDB. This process may take a few minutes.
               </div>
             </div>
             {enrichError && (
