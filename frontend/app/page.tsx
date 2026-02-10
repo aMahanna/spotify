@@ -17,13 +17,13 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { VisualizeTab } from "@/components/tabs/VisualizeTab"
 import { useRouter, useSearchParams } from "next/navigation"
 
-export default function Home() {
+function HomeContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [playlistUrl, setPlaylistUrl] = useState("")
@@ -370,6 +370,24 @@ export default function Home() {
         />
       </main>
     </div>
+  )
+}
+
+export default function Home() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-background text-foreground">
+          <main className="container mx-auto px-6 py-12">
+            <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+              Loading SpotifyKG...
+            </div>
+          </main>
+        </div>
+      }
+    >
+      <HomeContent />
+    </Suspense>
   )
 }
 
