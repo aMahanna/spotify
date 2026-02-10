@@ -56,19 +56,34 @@ export function GraphSelectionPanel({ selectedNodes, selectedEdges }: GraphSelec
       const decoder = new TextDecoder()
       let buffer = ""
       let doneStreaming = false
+      const consumeSseBuffer = (input: string) => {
+        const parts = input.split(/\r?\n\r?\n/)
+        return {
+          events: parts.slice(0, -1),
+          remaining: parts[parts.length - 1] || "",
+        }
+      }
+
+      const getDataPayloadFromEvent = (eventChunk: string) => {
+        const dataLines = eventChunk
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.replace(/^data:\s*/, ""))
+
+        return dataLines.join("\n").trim()
+      }
 
       while (!doneStreaming) {
         const { done, value } = await reader.read()
         if (done) break
         buffer += decoder.decode(value, { stream: true })
 
-        const parts = buffer.split("\n\n")
-        buffer = parts.pop() || ""
+        const { events, remaining } = consumeSseBuffer(buffer)
+        buffer = remaining
 
-        for (const part of parts) {
-          const trimmed = part.trim()
-          if (!trimmed.startsWith("data:")) continue
-          const payload = trimmed.replace(/^data:\s*/, "")
+        for (const eventChunk of events) {
+          const payload = getDataPayloadFromEvent(eventChunk)
           if (!payload) continue
 
           let parsed: { delta?: string; done?: boolean; error?: string } | null = null
