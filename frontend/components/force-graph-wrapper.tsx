@@ -2046,7 +2046,7 @@ export function ForceGraphWrapper({
                 console.log("✅ Re-clustering completed with new algorithm");
                 
                 // Get the clustered data from the engine
-                const clusteredData = clusteringEngineRef.current.getClusteredData();
+                const clusteredData = clusteringEngineRef.current?.getClusteredData();
                 console.log("🔍 Retrieved clustered data:", {
                   hasData: !!clusteredData,
                   hasNodes: !!clusteredData?.nodes,
@@ -2642,7 +2642,7 @@ export function ForceGraphWrapper({
                 console.log("✅ Initial clustering completed");
                 
                 // Get the clustered data from the engine
-                const clusteredData = clusteringEngineRef.current.getClusteredData();
+                const clusteredData = clusteringEngineRef.current?.getClusteredData();
                 if (clusteredData && clusteredData.nodes) {
                   // Update the graph data with new clusters
                   const updatedGraphData = {

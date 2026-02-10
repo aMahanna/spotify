@@ -167,6 +167,8 @@ export class WebGPUClusteringEngine {
   private forceBuffer: GPUBuffer | null = null;
   private forceComputePipeline: GPUComputePipeline | null = null;
   private forceBindGroup: GPUBindGroup | null = null;
+  private lastClusteredData: { nodes: any[]; links: any[] } | null = null;
+  private clusteringOptions: Record<string, unknown> | null = null;
   
   /**
    * Creates a new WebGPU clustering engine
@@ -354,7 +356,7 @@ export class WebGPUClusteringEngine {
    * Updates node positions and computes clusters
    * @param nodes Array of node data with positions
    */
-  updateNodePositions(nodes: any[]): boolean {
+  async updateNodePositions(nodes: any[], links: any[] = []): Promise<boolean> {
     if (!this.isInitialized || !this.device || !this.computePipeline || !this.bindGroup) {
       console.warn("WebGPU clustering engine not fully initialized");
       return false;
@@ -396,6 +398,29 @@ export class WebGPUClusteringEngine {
       
       // Submit commands
       this.device.queue.submit([commandEncoder.finish()]);
+
+      // Keep a local snapshot so callers can synchronously read clustered data.
+      this.lastClusteredData = {
+        nodes: nodes.map((node) => ({ ...node })),
+        links: Array.isArray(links) ? links : []
+      };
+
+      // Best-effort readback of GPU-generated cluster indices.
+      try {
+        const readback = await this.readClusteredData();
+        if (readback && readback.length > 0) {
+          this.lastClusteredData = {
+            nodes: nodes.map((node, index) => ({
+              ...node,
+              clusterIndex: readback[index]?.clusterIndex ?? node.clusterIndex,
+              nodeIndex: readback[index]?.nodeIndex ?? index
+            })),
+            links: Array.isArray(links) ? links : []
+          };
+        }
+      } catch (readbackError) {
+        console.warn("Cluster readback failed, using local node snapshot:", readbackError);
+      }
       
       return true;
     } catch (error) {
@@ -463,6 +488,28 @@ export class WebGPUClusteringEngine {
       console.error("Failed to read clustered data:", error);
       return null;
     }
+  }
+
+  /**
+   * Compatibility helper for components expecting immediate clustered results.
+   */
+  getClusteredData(): { nodes: any[]; links: any[] } | null {
+    return this.lastClusteredData;
+  }
+
+  /**
+   * Compatibility helper for optional semantic clustering settings.
+   * Current local WebGPU engine does not consume these directly.
+   */
+  setClusteringOptions(options: Record<string, unknown>): void {
+    this.clusteringOptions = options;
+  }
+
+  /**
+   * Exposes current engine availability to the UI.
+   */
+  isAvailable(): boolean {
+    return this.isInitialized;
   }
   
   /**
@@ -722,6 +769,8 @@ export class WebGPUClusteringEngine {
     this.bindGroup = null;
     this.forceComputePipeline = null;
     this.forceBindGroup = null;
+    this.lastClusteredData = null;
+    this.clusteringOptions = null;
     this.device = null;
     this.isInitialized = false;
   }
