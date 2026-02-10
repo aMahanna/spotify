@@ -268,6 +268,14 @@ function HomeContent() {
               Playlist visualization, clustering, and navigation powered by ArangoDB & GenAI.
             </p>
           </div>
+          <Link
+            href="https://github.com/aMahanna/spotify"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground transition-colors"
+          >
+            View on GitHub
+          </Link>
         </div>
 
         <div className="rounded-lg border border-border bg-card p-4">
