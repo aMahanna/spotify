@@ -351,7 +351,7 @@ export default function Home() {
               </Button>
               <div
                 id="enrich-tooltip"
-                className="pointer-events-none absolute left-1/2 z-10 mt-2 -translate-x-1/2 rounded bg-gray-900 px-3 py-1 text-xs text-white opacity-0 group-hover:opacity-100 transition-opacity min-w-max"
+                className="pointer-events-none absolute left-1/2 z-10 mt-2 -translate-x-1/2 rounded bg-gray-900 px-3 py-1 text-lg text-white opacity-0 group-hover:opacity-100 transition-opacity min-w-[330px] max-w-[24rem]"
                 role="tooltip"
               >
                 Contextualizes your playlist as graph using Wikidata, MusicBrainz, Wikipedia, Discogs, Last.fm, Genius, and TheAudioDB. This process may take a few minutes.
