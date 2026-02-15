@@ -1,4 +1,6 @@
-# Spotify Visual Storytelling
+# spotify
+
+[spotify.mahanna.dev](https://spotify.mahanna.dev/)
 
 Turn a Spotify playlist into an explorable story graph.
 
